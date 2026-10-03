@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-electron
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.env
+*.db
+*.db-shm
+*.db-wal
