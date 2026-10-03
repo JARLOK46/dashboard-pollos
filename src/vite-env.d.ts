@@ -11,6 +11,7 @@ declare global {
       sales: { create(input: unknown): Promise<unknown>; list(limit?: number): Promise<unknown[]>; get(id: number): Promise<unknown> };
       expenses: { create(input: unknown): Promise<unknown>; list(limit?: number): Promise<unknown[]> };
       dashboard: { summary(): Promise<unknown> };
+      export(format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }>;
     };
   }
 }

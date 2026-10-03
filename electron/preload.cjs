@@ -16,4 +16,5 @@ contextBridge.exposeInMainWorld('salesApi', {
     list: (limit) => ipcRenderer.invoke('expenses:list', limit),
   },
   dashboard: { summary: () => ipcRenderer.invoke('dashboard:summary') },
+  export: (format) => ipcRenderer.invoke('export:data', format),
 });
