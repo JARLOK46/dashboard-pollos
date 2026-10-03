@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld('salesApi', {
   export: (format) => ipcRenderer.invoke('export:data', format),
   window: { minimize: () => ipcRenderer.send('window:minimize'), maximize: () => ipcRenderer.send('window:maximize'), close: () => ipcRenderer.send('window:close'), isMaximized: () => ipcRenderer.invoke('window:is-maximized') },
   settings: { get: () => ipcRenderer.invoke('settings:get') },
+  cash: { open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents), get: () => ipcRenderer.invoke('cash:get'), close: (countedCents) => ipcRenderer.invoke('cash:close', countedCents) },
 });

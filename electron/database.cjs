@@ -123,6 +123,28 @@ function createExpense(input) {
 }
 
 function listExpenses(limit = 100) { return getDatabase().prepare('SELECT * FROM expenses ORDER BY datetime(created_at) DESC LIMIT ?').all(limit); }
+function openCashRegister(amountCents) {
+  const database = getDatabase();
+  const active = database.prepare("SELECT * FROM cash_movements WHERE type = 'opening' AND date(created_at) = date('now', 'localtime') ORDER BY id DESC LIMIT 1").get();
+  if (active) throw new Error('La caja ya fue abierta hoy.');
+  const result = database.prepare("INSERT INTO cash_movements (type, amount_cents, description) VALUES ('opening', ?, 'Apertura de caja')").run(amountCents);
+  return database.prepare('SELECT * FROM cash_movements WHERE id = ?').get(result.lastInsertRowid);
+}
+function getCashRegister() {
+  const database = getDatabase();
+  const opening = database.prepare("SELECT * FROM cash_movements WHERE type = 'opening' AND date(created_at) = date('now', 'localtime') ORDER BY id DESC LIMIT 1").get();
+  const movements = database.prepare("SELECT * FROM cash_movements WHERE date(created_at) = date('now', 'localtime') ORDER BY datetime(created_at) DESC, id DESC").all();
+  const balanceCents = movements.reduce((sum, movement) => sum + movement.amount_cents, 0);
+  return { opening, movements, balanceCents, isOpen: Boolean(opening) };
+}
+function closeCashRegister(countedCents) {
+  const register = getCashRegister();
+  if (!register.isOpen) throw new Error('La caja no está abierta.');
+  const differenceCents = countedCents - register.balanceCents;
+  const result = getDatabase().prepare("INSERT INTO cash_movements (type, amount_cents, description) VALUES ('adjustment', ?, ?)").run(differenceCents, `Cierre de caja · Diferencia ${differenceCents / 100}`);
+  return { id: Number(result.lastInsertRowid), expectedCents: register.balanceCents, countedCents, differenceCents };
+}
+
 function getDashboardSummary() {
   const database = getDatabase();
   return {
@@ -133,4 +155,4 @@ function getDashboardSummary() {
   };
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDashboardSummary };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDashboardSummary, openCashRegister, getCashRegister, closeCashRegister };

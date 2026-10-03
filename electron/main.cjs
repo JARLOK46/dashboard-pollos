@@ -37,6 +37,9 @@ function registerIpc() {
   ipcMain.handle('expenses:create', (_event, input) => database.createExpense(input));
   ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
   ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
+  ipcMain.handle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
+  ipcMain.handle('cash:get', () => database.getCashRegister());
+  ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
   ipcMain.handle('settings:get', () => ({ businessName: 'Pollo & Caja', currency: 'ARS', lowStockThreshold: 10 }));
   ipcMain.handle('export:data', async (_event, format) => {
     const fs = require('node:fs/promises');

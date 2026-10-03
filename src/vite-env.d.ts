@@ -14,6 +14,7 @@ declare global {
       export(format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }>;
       window: { minimize(): void; maximize(): void; close(): void; isMaximized(): Promise<boolean> };
       settings: { get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }> };
+      cash: { open(amountCents: number): Promise<unknown>; get(): Promise<{ opening: unknown; movements: any[]; balanceCents: number; isOpen: boolean }>; close(countedCents: number): Promise<{ expectedCents: number; countedCents: number; differenceCents: number }> };
     };
   }
 }
