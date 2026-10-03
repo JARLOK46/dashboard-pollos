@@ -12,6 +12,8 @@ declare global {
       expenses: { create(input: unknown): Promise<unknown>; list(limit?: number): Promise<unknown[]> };
       dashboard: { summary(): Promise<unknown> };
       export(format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }>;
+      window: { minimize(): void; maximize(): void; close(): void; isMaximized(): Promise<boolean> };
+      settings: { get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }> };
     };
   }
 }

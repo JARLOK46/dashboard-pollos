@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld('salesApi', {
   },
   dashboard: { summary: () => ipcRenderer.invoke('dashboard:summary') },
   export: (format) => ipcRenderer.invoke('export:data', format),
+  window: { minimize: () => ipcRenderer.send('window:minimize'), maximize: () => ipcRenderer.send('window:maximize'), close: () => ipcRenderer.send('window:close'), isMaximized: () => ipcRenderer.invoke('window:is-maximized') },
+  settings: { get: () => ipcRenderer.invoke('settings:get') },
 });
