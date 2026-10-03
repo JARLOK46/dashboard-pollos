@@ -41,6 +41,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "scripts/**/*",
       "package.json"
     ],
     "asar": true,
