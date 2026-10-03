@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@vitejs/plugin-react": "latest",
+    "better-sqlite3": "^13.0.3",
     "electron": "latest",
     "lucide-react": "latest",
     "react": "latest",
