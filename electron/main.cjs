@@ -41,7 +41,10 @@ function registerIpc() {
   ipcMain.handle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
   ipcMain.handle('cash:get', () => database.getCashRegister());
   ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
-  ipcMain.handle('settings:get', () => ({ businessName: 'Pollo & Caja', currency: 'ARS', lowStockThreshold: 10 }));
+  ipcMain.handle('settings:get', () => database.getSettings());
+  ipcMain.handle('settings:update', (_event, input) => database.updateSettings(input));
+  ipcMain.handle('auth:login', (_event, input) => database.authenticateAdmin(input?.email, input?.password));
+  ipcMain.handle('auth:change-password', (_event, input) => database.changeAdminPassword(input?.currentPassword, input?.newPassword));
   ipcMain.handle('export:data', async (_event, format) => {
     const fs = require('node:fs/promises');
     const extension = format === 'csv' ? 'csv' : 'xlsx';

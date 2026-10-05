@@ -2,6 +2,11 @@ const Database = require('better-sqlite3');
 const { app } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
+
+const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
+const DEFAULT_ADMIN_PASSWORD = 'admin123*';
+const PASSWORD_KEY_LENGTH = 64;
 
 let db;
 
@@ -64,9 +69,67 @@ function migrate(database) {
       description TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT OR IGNORE INTO settings (key, value) VALUES
+      ('businessName', 'Pollo & Caja'),
+      ('currency', 'ARS'),
+      ('lowStockThreshold', '10');
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
   `);
+  const admin = database.prepare('SELECT id FROM users WHERE email = ?').get(DEFAULT_ADMIN_EMAIL);
+  if (!admin) {
+    const password = hashPassword(DEFAULT_ADMIN_PASSWORD);
+    database.prepare('INSERT INTO users (email, password_hash, password_salt) VALUES (?, ?, ?)').run(DEFAULT_ADMIN_EMAIL, password.hash, password.salt);
+  }
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, PASSWORD_KEY_LENGTH);
+  return { salt: salt.toString('hex'), hash: hash.toString('hex') };
+}
+
+function validatePassword(password) {
+  if (typeof password !== 'string' || password.length < 8 || password.length > 128) throw new Error('La contraseña debe tener entre 8 y 128 caracteres.');
+}
+
+function validateEmail(email) {
+  if (typeof email !== 'string' || email.length > 254 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) throw new Error('El correo electrónico no es válido.');
+  return email.trim().toLowerCase();
+}
+
+function verifyPassword(password, record) {
+  const derived = crypto.scryptSync(password, Buffer.from(record.password_salt, 'hex'), PASSWORD_KEY_LENGTH);
+  const stored = Buffer.from(record.password_hash, 'hex');
+  return stored.length === derived.length && crypto.timingSafeEqual(stored, derived);
+}
+
+function authenticateAdmin(email, password) {
+  const normalizedEmail = validateEmail(email);
+  validatePassword(password);
+  const record = getDatabase().prepare('SELECT password_hash, password_salt FROM users WHERE email = ?').get(normalizedEmail);
+  return Boolean(record && verifyPassword(password, record));
+}
+
+function changeAdminPassword(currentPassword, newPassword) {
+  validatePassword(currentPassword);
+  validatePassword(newPassword);
+  if (!authenticateAdmin(DEFAULT_ADMIN_EMAIL, currentPassword)) throw new Error('La contraseña actual es incorrecta.');
+  const password = hashPassword(newPassword);
+  getDatabase().prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?').run(password.hash, password.salt, DEFAULT_ADMIN_EMAIL);
+  return { changed: true };
 }
 
 function listProducts() {
@@ -159,14 +222,33 @@ function closeCashRegister(countedCents) {
   return { id: Number(result.lastInsertRowid), expectedCents: register.balanceCents, countedCents, differenceCents };
 }
 
+function getSettings() {
+  const rows = getDatabase().prepare('SELECT key, value FROM settings').all();
+  const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  return { businessName: values.businessName || 'Pollo & Caja', currency: values.currency || 'ARS', lowStockThreshold: Number(values.lowStockThreshold) || 10 };
+}
+
+function updateSettings(input) {
+  const businessName = String(input.businessName || '').trim();
+  const currency = String(input.currency || '').trim().toUpperCase();
+  const lowStockThreshold = Number(input.lowStockThreshold);
+  if (!businessName || businessName.length > 100) throw new Error('El nombre del negocio debe tener entre 1 y 100 caracteres.');
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error('La moneda debe ser un código de 3 letras.');
+  if (!Number.isInteger(lowStockThreshold) || lowStockThreshold < 0 || lowStockThreshold > 100000) throw new Error('El umbral de stock no es válido.');
+  const database = getDatabase();
+  const save = database.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  database.transaction(() => { save.run('businessName', businessName); save.run('currency', currency); save.run('lowStockThreshold', String(lowStockThreshold)); })();
+  return getSettings();
+}
+
 function getDashboardSummary() {
   const database = getDatabase();
   return {
     salesTodayCents: database.prepare(`SELECT COALESCE(SUM(total_cents), 0) AS value FROM sales WHERE date(created_at) = date('now', 'localtime')`).get().value,
     ordersToday: database.prepare(`SELECT COUNT(*) AS value FROM sales WHERE date(created_at) = date('now', 'localtime')`).get().value,
     expensesTodayCents: database.prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS value FROM expenses WHERE date(created_at) = date('now', 'localtime')`).get().value,
-    lowStock: database.prepare('SELECT * FROM products WHERE active = 1 AND stock <= 10 ORDER BY stock, name').all(),
+    lowStock: database.prepare('SELECT * FROM products WHERE active = 1 AND stock <= ? ORDER BY stock, name').all(getSettings().lowStockThreshold),
   };
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDashboardSummary, openCashRegister, getCashRegister, closeCashRegister };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDashboardSummary, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister };
