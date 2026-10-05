@@ -1,5 +1,6 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const database = require('./database.cjs');
 const XLSX = require('xlsx');
 const { buildWorkbook } = require('../scripts/export-report.cjs');
@@ -38,10 +39,46 @@ function registerIpc() {
   ipcMain.handle('expenses:create', (_event, input) => database.createExpense(input));
   ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
   ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
+  ipcMain.handle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
+  ipcMain.handle('database:backup', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showSaveDialog(win, { title: 'Crear copia de seguridad', defaultPath: 'pollo-caja-backup.sqlite', filters: [{ name: 'Base de datos SQLite', extensions: ['sqlite', 'db'] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    if (fs.existsSync(result.filePath)) {
+      const confirmation = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Cancelar', 'Reemplazar'], defaultId: 0, cancelId: 0, title: 'Reemplazar copia existente', message: 'Ya existe una copia en esa ubicación.', detail: '¿Querés reemplazarla de forma segura?', noLink: true });
+      if (confirmation.response !== 1) return { canceled: true };
+    }
+    return { canceled: false, ...(await database.backupDatabase(result.filePath)) };
+  });
+  ipcMain.handle('database:restore', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, { title: 'Restaurar copia de seguridad', properties: ['openFile'], filters: [{ name: 'Base de datos SQLite', extensions: ['sqlite', 'db'] }] });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    const confirmation = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Cancelar', 'Restaurar'], defaultId: 0, cancelId: 0, title: 'Confirmar restauración', message: 'La restauración reemplazará todos los datos actuales.', detail: 'Esta acción no se puede deshacer. Creá una copia antes de continuar.' });
+    if (confirmation.response !== 1) return { canceled: true };
+    return { canceled: false, ...database.restoreDatabase(result.filePaths[0]) };
+  });
+  ipcMain.handle('report:export', async (_event, businessDate, format) => {
+    const fs = require('node:fs/promises');
+    const report = database.getDailyReport(businessDate);
+    const extension = format === 'csv' ? 'csv' : 'xlsx';
+    const result = await dialog.showSaveDialog({ title: 'Exportar reporte diario', defaultPath: `reporte-${businessDate}.${extension}`, filters: [{ name: extension === 'csv' ? 'CSV' : 'Excel', extensions: [extension] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    if (extension === 'xlsx') XLSX.writeFile(buildWorkbook(report.sales, report.expenses, report), result.filePath);
+    else {
+      const rows = [['Reporte diario', businessDate], ['Ventas', report.totalCents / 100], ['Pedidos', report.orders], ['Efectivo', report.paymentSplit.cashCents / 100], ['Tarjeta', report.paymentSplit.cardCents / 100], ['Costo', report.costCents / 100], ['Ganancia bruta', report.grossProfitCents / 100], ['Margen %', report.marginPercent], ['Gastos', report.expensesTotalCents / 100], ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents / 100], ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents / 100], ['Contado caja', report.cash.countedCents == null ? '' : report.cash.countedCents / 100], ['Diferencia caja', report.cash.differenceCents == null ? '' : report.cash.differenceCents / 100], ['Estado caja', report.cash.status], [], ['Categoría', 'Total'], ...report.expenses.map((expense) => [expense.category, expense.total_cents / 100])];
+      const escape = (value) => `"${String(value).replaceAll('"', '""')}"`;
+      await fs.writeFile(result.filePath, rows.map((row) => row.map(escape).join(',')).join('\\n'), 'utf8');
+    }
+    return { canceled: false, filePath: result.filePath };
+  });
   ipcMain.handle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
   ipcMain.handle('cash:get', () => database.getCashRegister());
   ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
-  ipcMain.handle('settings:get', () => ({ businessName: 'Pollo & Caja', currency: 'ARS', lowStockThreshold: 10 }));
+  ipcMain.handle('settings:get', () => database.getSettings());
+  ipcMain.handle('settings:update', (_event, input) => database.updateSettings(input));
+  ipcMain.handle('auth:login', (_event, input) => database.authenticateAdmin(input?.email, input?.password));
+  ipcMain.handle('auth:change-password', (_event, input) => database.changeAdminPassword(input?.currentPassword, input?.newPassword));
   ipcMain.handle('export:data', async (_event, format) => {
     const fs = require('node:fs/promises');
     const extension = format === 'csv' ? 'csv' : 'xlsx';

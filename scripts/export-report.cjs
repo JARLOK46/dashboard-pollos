@@ -1,7 +1,7 @@
 const XLSX = require('xlsx');
 const fs = require('node:fs');
 
-function buildWorkbook(sales, expenses) {
+function buildWorkbook(sales, expenses, report = null) {
   const workbook = XLSX.utils.book_new();
   const totalSales = sales.reduce((sum, sale) => sum + sale.total_cents, 0);
   const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount_cents, 0);
@@ -11,8 +11,14 @@ function buildWorkbook(sales, expenses) {
     ['Generado', new Date().toLocaleString('es-AR')],
     [],
     ['RESUMEN'],
-    ['Ventas registradas', sales.length],
-    ['Ingresos por ventas', totalSales / 100],
+    ['Fecha del reporte', report?.businessDate || ''],
+    ['Ventas registradas', report?.orders ?? sales.length],
+    ['Ingresos por ventas', report?.totalCents != null ? report.totalCents / 100 : totalSales / 100],
+    ['Efectivo', report?.paymentSplit ? report.paymentSplit.cashCents / 100 : ''],
+    ['Tarjeta', report?.paymentSplit ? report.paymentSplit.cardCents / 100 : ''],
+    ['Costo de ventas', report?.costCents != null ? report.costCents / 100 : ''],
+    ['Ganancia bruta', report?.grossProfitCents != null ? report.grossProfitCents / 100 : ''],
+    ['Margen %', report?.marginPercent ?? ''],
     ['Gastos registrados', expenses.length],
     ['Total de gastos', totalExpenses / 100],
     ['Resultado neto', (totalSales - totalExpenses) / 100],
