@@ -139,7 +139,7 @@ function validatePassword(password) {
 }
 
 function validateEmail(email) {
-  if (typeof email !== 'string' || email.length > 254 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) throw new Error('El correo electrónico no es válido.');
+  if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('El correo electrónico no es válido.');
   return email.trim().toLowerCase();
 }
 
@@ -320,7 +320,7 @@ function updateSettings(input) {
 }
 
 function getDailyReport(businessDate) {
-  if (typeof businessDate !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(businessDate)) throw new Error('La fecha del reporte no es válida.');
+  if (typeof businessDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) throw new Error('La fecha del reporte no es válida.');
   const database = getDatabase();
   const sales = database.prepare("SELECT * FROM sales WHERE date(created_at, 'localtime') = date(?) ORDER BY datetime(created_at), id").all(businessDate);
   const saleIds = sales.map((sale) => sale.id);
