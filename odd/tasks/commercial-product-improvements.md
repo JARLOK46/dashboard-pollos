@@ -25,14 +25,14 @@ A single small chicken shop, one location, primarily counter sales, with one own
 - Snapshot product cost on each sale to preserve historical margins.
 
 ## Tasks
-1. Add persistent business settings and editable settings UI — pending
+1. Add persistent business settings and editable settings UI — complete
 2. Add single-admin configurable authentication — complete
 3. Strengthen cash register lifecycle and closure records — complete
-4. Add product costs and historical margin snapshots — pending
+4. Add product costs and historical margin snapshots — complete
 5. Add daily operational report and export — pending
 6. Add safe backup and restore — pending
 7. Verify commercial flows and package build — pending
 
 ## Evidence
 - Existing app already has products, sales, expenses, cash movements, exports, and SQLite persistence.
-- Current settings are hard-coded/read-only; login is renderer-side hard-coded; cash close does not create an explicit closed state; no backup exists; products have no cost field.
+- Persistent settings, secure single-admin authentication, explicit cash closure, and product cost snapshots are implemented; daily report and backup/restore remain pending.
