@@ -12,7 +12,7 @@ const dateInput = (date: Date) => date.toISOString().slice(0, 10);
 const defaultRange = () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 6); return { from: dateInput(from), to: dateInput(to) }; };
 
 function App() {
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('pollo-caja-theme') === 'dark');
   const [authenticated, setAuthenticated] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
@@ -20,6 +20,7 @@ function App() {
   const [summary, setSummary] = useState<{salesTodayCents:number;ordersToday:number;expensesTodayCents:number;lowStock:Product[]} | null>(null);
   const refresh = async () => { const [p, s, d] = await Promise.all([window.salesApi.products.list(), window.salesApi.sales.list(100), window.salesApi.dashboard.summary()]); setProducts(p); setSales(s as Sale[]); setSummary(d as typeof summary); };
   useEffect(() => { refresh(); }, []);
+  useEffect(() => { localStorage.setItem('pollo-caja-theme', darkMode ? 'dark' : 'light'); }, [darkMode]);
   const navigate = (next: Page) => setPage(next);
   if (!authenticated) return <><TitleBar /><Login onLogin={() => setAuthenticated(true)} /></>;
   return <div className={darkMode ? 'app-shell dark-theme' : 'app-shell'}><TitleBar /><div className="theme-shell" /><Sidebar page={page} navigate={navigate} /><main className="main-content"><header className="topbar"><div><p className="eyebrow">{today().toUpperCase()}</p><h1>{page === 'dashboard' ? 'Buen día, Jarlok 👋' : page === 'products' ? 'Productos' : page === 'checkout' ? 'Nueva venta' : 'Historial de ventas'}</h1><p className="subtitle">{page === 'dashboard' ? 'Este es el resumen de tu negocio hoy.' : 'Gestioná tu operación de forma simple y rápida.'}</p></div><div className="top-actions"><button className="theme-toggle" title={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'} onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀' : '☾'}</button><div className="avatar">JG</div></div></header>{page === 'dashboard' && <Dashboard summary={summary} sales={sales} navigate={navigate} />}{page === 'products' && <Products products={products} refresh={refresh} navigate={navigate} />}{page === 'checkout' && <Checkout products={products} onSaved={async () => { await refresh(); navigate('history'); }} />}{page === 'history' && <History sales={sales} />}{page === 'expenses' && <Expenses />}{page === 'cash' && <CashRegister />}</main></div>;
