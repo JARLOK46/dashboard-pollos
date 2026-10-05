@@ -108,8 +108,22 @@ function getSale(id) {
   return { ...sale, items: database.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(id) };
 }
 
-function listSales(limit = 100) {
-  return getDatabase().prepare('SELECT * FROM sales ORDER BY datetime(created_at) DESC LIMIT ?').all(limit).map((sale) => ({ ...sale, items: getDatabase().prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(sale.id) }));
+function listSales(limit = 100, filters = {}) {
+  const database = getDatabase();
+  const conditions = []; const params = [];
+  if (filters.from) { conditions.push("date(s.created_at) >= date(?)"); params.push(filters.from); }
+  if (filters.to) { conditions.push("date(s.created_at) <= date(?)"); params.push(filters.to); }
+  if (filters.paymentMethod && filters.paymentMethod !== 'all') { conditions.push('s.payment_method = ?'); params.push(filters.paymentMethod); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return database.prepare(`SELECT s.* FROM sales s ${where} ORDER BY datetime(s.created_at) DESC LIMIT ?`).all(...params, limit).map((sale) => ({ ...sale, items: database.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(sale.id) }));
+}
+function getSalesAnalytics(filters = {}) {
+  const database = getDatabase();
+  const sales = listSales(10000, filters);
+  const byDay = database.prepare(`SELECT date(created_at) AS day, COALESCE(SUM(total_cents),0) AS total_cents, COUNT(*) AS orders FROM sales WHERE date(created_at) BETWEEN date(?) AND date(?) GROUP BY date(created_at) ORDER BY day`).all(filters.from, filters.to);
+  const byPayment = database.prepare(`SELECT payment_method, COALESCE(SUM(total_cents),0) AS total_cents, COUNT(*) AS orders FROM sales WHERE date(created_at) BETWEEN date(?) AND date(?) GROUP BY payment_method`).all(filters.from, filters.to);
+  const byProduct = database.prepare(`SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE date(s.created_at) BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY total_cents DESC LIMIT 5`).all(filters.from, filters.to);
+  return { sales, byDay, byPayment, byProduct, totalCents: sales.reduce((sum, sale) => sum + sale.total_cents, 0), orders: sales.length };
 }
 
 function createExpense(input) {
