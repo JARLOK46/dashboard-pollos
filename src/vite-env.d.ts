@@ -15,7 +15,7 @@ declare global {
       window: { minimize(): void; maximize(): void; close(): void; isMaximized(): Promise<boolean> };
       settings: { get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; update(input: { businessName: string; currency: string; lowStockThreshold: number }): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ changed: boolean }> };
       auth: { login(input: { email: string; password: string }): Promise<boolean> };
-      cash: { open(amountCents: number): Promise<unknown>; get(): Promise<{ opening: unknown; movements: any[]; balanceCents: number; isOpen: boolean }>; close(countedCents: number): Promise<{ expectedCents: number; countedCents: number; differenceCents: number }> };
+      cash: { open(amountCents: number): Promise<unknown>; get(): Promise<{ opening: unknown; register?: any; movements: any[]; balanceCents: number; expectedCents?: number; countedCents?: number; differenceCents?: number; isOpen: boolean; isClosed?: boolean }>; close(countedCents: number): Promise<{ expectedCents: number; countedCents: number; differenceCents: number }> };
     };
   }
 }

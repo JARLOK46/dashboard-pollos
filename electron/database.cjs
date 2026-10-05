@@ -61,11 +61,23 @@ function migrate(database) {
       notes TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS cash_registers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_date TEXT NOT NULL UNIQUE,
+      opening_cents INTEGER NOT NULL CHECK (opening_cents >= 0),
+      opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+      closed_at TEXT,
+      expected_cents INTEGER,
+      counted_cents INTEGER,
+      difference_cents INTEGER
+    );
     CREATE TABLE IF NOT EXISTS cash_movements (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL CHECK (type IN ('opening', 'sale', 'expense', 'withdrawal', 'adjustment')),
       amount_cents INTEGER NOT NULL,
       reference_id INTEGER,
+      register_id INTEGER REFERENCES cash_registers(id),
       description TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -88,6 +100,19 @@ function migrate(database) {
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
   `);
+  const movementColumns = database.prepare('PRAGMA table_info(cash_movements)').all().map((column) => column.name);
+  if (!movementColumns.includes('register_id')) database.exec('ALTER TABLE cash_movements ADD COLUMN register_id INTEGER REFERENCES cash_registers(id)');
+  const legacyOpenings = database.prepare("SELECT id, amount_cents, date(created_at, 'localtime') AS business_date, created_at FROM cash_movements WHERE type = 'opening' AND register_id IS NULL").all();
+  const insertRegister = database.prepare('INSERT OR IGNORE INTO cash_registers (business_date, opening_cents, opened_at) VALUES (?, ?, ?)');
+  const linkOpening = database.prepare('UPDATE cash_movements SET register_id = ? WHERE id = ?');
+  for (const opening of legacyOpenings) {
+    insertRegister.run(opening.business_date, opening.amount_cents, opening.created_at);
+    const register = database.prepare('SELECT id FROM cash_registers WHERE business_date = ?').get(opening.business_date);
+    if (register) linkOpening.run(register.id, opening.id);
+  }
+  const linkHistoricalMovements = database.prepare("UPDATE cash_movements SET register_id = (SELECT r.id FROM cash_registers r WHERE r.business_date = date(cash_movements.created_at, 'localtime')) WHERE register_id IS NULL AND date(created_at, 'localtime') IN (SELECT business_date FROM cash_registers)");
+  linkHistoricalMovements.run();
+  database.exec('CREATE INDEX IF NOT EXISTS idx_cash_movements_register_id ON cash_movements(register_id)');
   const admin = database.prepare('SELECT id FROM users WHERE email = ?').get(DEFAULT_ADMIN_EMAIL);
   if (!admin) {
     const password = hashPassword(DEFAULT_ADMIN_PASSWORD);
@@ -149,16 +174,17 @@ function updateProduct(input) {
 function createSale(input) {
   const database = getDatabase();
   const create = database.transaction(() => {
+    const register = input.paymentMethod === 'cash' ? getOpenCashRegister(database) : null;
     const sale = database.prepare(`INSERT INTO sales (total_cents, payment_method, amount_received_cents, change_cents, customer_name, notes) VALUES (?, ?, ?, ?, ?, ?)`).run(input.totalCents, input.paymentMethod, input.amountReceivedCents, input.changeCents, input.customerName || '', input.notes || '');
     const insertItem = database.prepare(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price_cents, subtotal_cents) VALUES (?, ?, ?, ?, ?, ?)`);
     const updateStock = database.prepare('UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND stock >= ?');
-    const movement = database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, description) VALUES ('sale', ?, ?, ?)`);
+    const movement = database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('sale', ?, ?, ?, ?)`);
     for (const item of input.items) {
       const changed = updateStock.run(item.quantity, item.productId, item.quantity);
       if (changed.changes !== 1) throw new Error(`Insufficient stock for product ${item.productId}`);
       insertItem.run(sale.lastInsertRowid, item.productId, item.productName, item.quantity, item.unitPriceCents, item.subtotalCents);
     }
-    movement.run(input.paymentMethod === 'cash' ? input.totalCents : 0, sale.lastInsertRowid, `Sale #${sale.lastInsertRowid}`);
+    if (input.paymentMethod === 'cash') movement.run(input.totalCents, sale.lastInsertRowid, register.id, `Sale #${sale.lastInsertRowid}`);
     return sale.lastInsertRowid;
   })();
   return getSale(Number(create));
@@ -193,33 +219,45 @@ function createExpense(input) {
   const database = getDatabase();
   const result = database.transaction(() => {
     const expense = database.prepare(`INSERT INTO expenses (description, amount_cents, category, notes) VALUES (?, ?, ?, ?)`).run(input.description, input.amountCents, input.category || 'other', input.notes || '');
-    database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, description) VALUES ('expense', ?, ?, ?)`).run(-input.amountCents, expense.lastInsertRowid, input.description);
+    const register = getOpenCashRegister(database);
+    database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('expense', ?, ?, ?, ?)`).run(-input.amountCents, expense.lastInsertRowid, register.id, input.description);
     return expense.lastInsertRowid;
   })();
   return database.prepare('SELECT * FROM expenses WHERE id = ?').get(result);
 }
 
 function listExpenses(limit = 100) { return getDatabase().prepare('SELECT * FROM expenses ORDER BY datetime(created_at) DESC LIMIT ?').all(limit); }
+function getOpenCashRegister(database = getDatabase()) {
+  const register = database.prepare("SELECT * FROM cash_registers WHERE business_date = date('now', 'localtime') AND status = 'open'").get();
+  if (!register) throw new Error('La caja no está abierta. Abrí la caja antes de registrar movimientos de efectivo.');
+  return register;
+}
 function openCashRegister(amountCents) {
   const database = getDatabase();
-  const active = database.prepare("SELECT * FROM cash_movements WHERE type = 'opening' AND date(created_at) = date('now', 'localtime') ORDER BY id DESC LIMIT 1").get();
-  if (active) throw new Error('La caja ya fue abierta hoy.');
-  const result = database.prepare("INSERT INTO cash_movements (type, amount_cents, description) VALUES ('opening', ?, 'Apertura de caja')").run(amountCents);
-  return database.prepare('SELECT * FROM cash_movements WHERE id = ?').get(result.lastInsertRowid);
+  const existing = database.prepare("SELECT * FROM cash_registers WHERE business_date = date('now', 'localtime')").get();
+  if (existing) throw new Error(existing.status === 'closed' ? 'La caja de hoy ya fue cerrada.' : 'La caja ya fue abierta hoy.');
+  const result = database.transaction(() => {
+    const register = database.prepare("INSERT INTO cash_registers (business_date, opening_cents) VALUES (date('now', 'localtime'), ?)").run(amountCents);
+    database.prepare("INSERT INTO cash_movements (type, amount_cents, register_id, description) VALUES ('opening', ?, ?, 'Apertura de caja')").run(amountCents, register.lastInsertRowid);
+    return register.lastInsertRowid;
+  })();
+  return database.prepare('SELECT * FROM cash_registers WHERE id = ?').get(result);
 }
 function getCashRegister() {
   const database = getDatabase();
-  const opening = database.prepare("SELECT * FROM cash_movements WHERE type = 'opening' AND date(created_at) = date('now', 'localtime') ORDER BY id DESC LIMIT 1").get();
-  const movements = database.prepare("SELECT * FROM cash_movements WHERE date(created_at) = date('now', 'localtime') ORDER BY datetime(created_at) DESC, id DESC").all();
+  const register = database.prepare("SELECT * FROM cash_registers WHERE business_date = date('now', 'localtime')").get() || null;
+  const movements = register ? database.prepare('SELECT * FROM cash_movements WHERE register_id = ? ORDER BY datetime(created_at) DESC, id DESC').all(register.id) : [];
   const balanceCents = movements.reduce((sum, movement) => sum + movement.amount_cents, 0);
-  return { opening, movements, balanceCents, isOpen: Boolean(opening) };
+  return { opening: movements.find((movement) => movement.type === 'opening') || null, register, movements, balanceCents, isOpen: register?.status === 'open', isClosed: register?.status === 'closed' };
 }
 function closeCashRegister(countedCents) {
-  const register = getCashRegister();
-  if (!register.isOpen) throw new Error('La caja no está abierta.');
-  const differenceCents = countedCents - register.balanceCents;
-  const result = getDatabase().prepare("INSERT INTO cash_movements (type, amount_cents, description) VALUES ('adjustment', ?, ?)").run(differenceCents, `Cierre de caja · Diferencia ${differenceCents / 100}`);
-  return { id: Number(result.lastInsertRowid), expectedCents: register.balanceCents, countedCents, differenceCents };
+  const database = getDatabase();
+  const register = getOpenCashRegister(database);
+  const movements = database.prepare('SELECT amount_cents FROM cash_movements WHERE register_id = ?').all(register.id);
+  const expectedCents = movements.reduce((sum, movement) => sum + movement.amount_cents, 0);
+  const differenceCents = countedCents - expectedCents;
+  database.prepare("UPDATE cash_registers SET status = 'closed', closed_at = CURRENT_TIMESTAMP, expected_cents = ?, counted_cents = ?, difference_cents = ? WHERE id = ? AND status = 'open'").run(expectedCents, countedCents, differenceCents, register.id);
+  return { id: register.id, expectedCents, countedCents, differenceCents };
 }
 
 function getSettings() {

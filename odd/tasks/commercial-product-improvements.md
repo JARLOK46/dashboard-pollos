@@ -27,7 +27,7 @@ A single small chicken shop, one location, primarily counter sales, with one own
 ## Tasks
 1. Add persistent business settings and editable settings UI — pending
 2. Add single-admin configurable authentication — complete
-3. Strengthen cash register lifecycle and closure records — pending
+3. Strengthen cash register lifecycle and closure records — complete
 4. Add product costs and historical margin snapshots — pending
 5. Add daily operational report and export — pending
 6. Add safe backup and restore — pending
