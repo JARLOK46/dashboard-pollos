@@ -449,4 +449,25 @@ function getDashboardSummary() {
   };
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, listExpenses, getDailyReport, getDashboardSummary, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+function getDashboardAlerts() {
+  const database = getDatabase();
+  const settings = getSettings();
+  const alerts = [];
+  const outOfStock = database.prepare('SELECT id, name FROM products WHERE active = 1 AND stock = 0 ORDER BY name').all();
+  const lowStock = database.prepare('SELECT id, name, stock FROM products WHERE active = 1 AND stock > 0 AND stock <= ? ORDER BY stock, name').all(settings.lowStockThreshold);
+  if (outOfStock.length) alerts.push({ id: 'stock-out', severity: 'critical', title: 'Productos sin stock', message: `${outOfStock.length} producto${outOfStock.length === 1 ? '' : 's'} no disponible${outOfStock.length === 1 ? '' : 's'}.`, page: 'products' });
+  if (lowStock.length) alerts.push({ id: 'stock-low', severity: 'warning', title: 'Stock bajo', message: `${lowStock.length} producto${lowStock.length === 1 ? '' : 's'} cerca del mínimo.`, page: 'products' });
+  const register = database.prepare("SELECT * FROM cash_registers WHERE business_date = date('now', 'localtime')").get();
+  if (!register) alerts.push({ id: 'cash-not-open', severity: 'critical', title: 'Caja sin abrir', message: 'Abrí la caja para registrar movimientos en efectivo.', page: 'cash' });
+  else if (register.status === 'open') alerts.push({ id: 'cash-open', severity: 'warning', title: 'Caja todavía abierta', message: 'Revisá y cerrá la caja al finalizar la jornada.', page: 'cash' });
+  else if (register.difference_cents) alerts.push({ id: 'cash-difference', severity: Math.abs(register.difference_cents) >= 1000 ? 'critical' : 'warning', title: 'Diferencia de caja detectada', message: `La diferencia registrada es de ${register.difference_cents > 0 ? '+' : ''}$ ${(Math.abs(register.difference_cents) / 100).toLocaleString('es-AR', { minimumFractionDigits: 2 })}.`, page: 'cash' });
+  const marginProducts = database.prepare('SELECT id, name FROM products WHERE active = 1 AND price_cents <= cost_cents').all();
+  if (marginProducts.length) alerts.push({ id: 'margin-low', severity: 'warning', title: 'Margen de producto bajo', message: `${marginProducts.length} producto${marginProducts.length === 1 ? '' : 's'} tiene margen nulo o negativo.`, page: 'products' });
+  const expenseStats = database.prepare("SELECT COALESCE(SUM(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') THEN amount_cents ELSE 0 END), 0) AS today, COALESCE(SUM(CASE WHEN date(created_at, 'localtime') >= date('now', 'localtime', '-7 day') AND date(created_at, 'localtime') < date('now', 'localtime') THEN amount_cents ELSE 0 END), 0) AS previous, COUNT(DISTINCT CASE WHEN date(created_at, 'localtime') >= date('now', 'localtime', '-7 day') AND date(created_at, 'localtime') < date('now', 'localtime') THEN date(created_at, 'localtime') END) AS days FROM expenses").get();
+  const averageExpense = expenseStats.days ? expenseStats.previous / expenseStats.days : 0;
+  if (expenseStats.today > 0 && averageExpense > 0 && expenseStats.today >= averageExpense * 1.5) alerts.push({ id: 'expenses-high', severity: 'info', title: 'Gastos inusualmente altos', message: 'Los gastos de hoy superan el promedio reciente.', page: 'expenses' });
+  const order = { critical: 0, warning: 1, info: 2 };
+  return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

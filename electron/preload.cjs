@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('salesApi', {
     create: (input) => ipcRenderer.invoke('expenses:create', input),
     list: (limit) => ipcRenderer.invoke('expenses:list', limit),
   },
-  dashboard: { summary: () => ipcRenderer.invoke('dashboard:summary') },
+  dashboard: { summary: () => ipcRenderer.invoke('dashboard:summary'), alerts: () => ipcRenderer.invoke('dashboard:alerts') },
   report: { daily: (businessDate) => ipcRenderer.invoke('report:daily', businessDate), export: (businessDate, format) => ipcRenderer.invoke('report:export', businessDate, format) },
   export: (format) => ipcRenderer.invoke('export:data', format),
   database: { backup: () => ipcRenderer.invoke('database:backup'), restore: () => ipcRenderer.invoke('database:restore') },
