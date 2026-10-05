@@ -15,6 +15,7 @@ declare global {
       dashboard: { summary(): Promise<unknown> };
       report: { daily(businessDate: string): Promise<DailyReport>; export(businessDate: string, format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }> };
       export(format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }>;
+      database: { backup(): Promise<{ canceled: boolean; filePath?: string }>; restore(): Promise<{ canceled: boolean; restored?: boolean }> };
       window: { minimize(): void; maximize(): void; close(): void; isMaximized(): Promise<boolean> };
       settings: { get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; update(input: { businessName: string; currency: string; lowStockThreshold: number }): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ changed: boolean }> };
       auth: { login(input: { email: string; password: string }): Promise<boolean> };

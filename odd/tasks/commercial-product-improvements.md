@@ -30,9 +30,10 @@ A single small chicken shop, one location, primarily counter sales, with one own
 3. Strengthen cash register lifecycle and closure records — complete
 4. Add product costs and historical margin snapshots — complete
 5. Add daily operational report and export — pending
-6. Add safe backup and restore — pending
+6. Add safe backup and restore — complete
 7. Verify commercial flows and package build — pending
 
 ## Evidence
 - Existing app already has products, sales, expenses, cash movements, exports, and SQLite persistence.
-- Persistent settings, secure single-admin authentication, explicit cash closure, and product cost snapshots are implemented; daily report and backup/restore remain pending.
+- Persistent settings, secure single-admin authentication, explicit cash closure, product cost snapshots, and safe validated backup/restore are implemented; commercial flow verification remains pending.
+- Task 6 evidence: main-process save/open dialogs expose backup and restore IPC; backups checkpoint WAL and use temporary replacement; restores validate integrity, schema version, and required tables, then replace the active database path while reopening the handle; Settings exposes explicit backup/restore controls and status feedback.

@@ -7,14 +7,20 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
+const SCHEMA_VERSION = 1;
+const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users'];
 
 let db;
+
+function getDatabasePath() {
+  return path.join(app.getPath('userData'), 'pollo-caja.sqlite');
+}
 
 function getDatabase() {
   if (db) return db;
   const directory = app.getPath('userData');
   fs.mkdirSync(directory, { recursive: true });
-  db = new Database(path.join(directory, 'pollo-caja.sqlite'));
+  db = new Database(getDatabasePath());
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   migrate(db);
@@ -125,6 +131,100 @@ function migrate(database) {
   if (!admin) {
     const password = hashPassword(DEFAULT_ADMIN_PASSWORD);
     database.prepare('INSERT INTO users (email, password_hash, password_salt) VALUES (?, ?, ?)').run(DEFAULT_ADMIN_EMAIL, password.hash, password.salt);
+  }
+  database.pragma(`user_version = ${SCHEMA_VERSION}`);
+}
+
+function validateDatabaseFile(filePath) {
+  let candidate;
+  try {
+    candidate = new Database(filePath, { readonly: true, fileMustExist: true });
+    if (candidate.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('La integridad de la base de datos no es válida.');
+    if (candidate.pragma('user_version', { simple: true }) !== SCHEMA_VERSION) throw new Error('La versión de la base de datos no es compatible.');
+    const tables = candidate.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
+    const missing = REQUIRED_TABLES.filter((table) => !tables.includes(table));
+    if (missing.length) throw new Error(`Faltan tablas requeridas: ${missing.join(', ')}.`);
+    return true;
+  } finally {
+    candidate?.close();
+  }
+}
+
+function databaseSidecars(filePath) {
+  return [`${filePath}-wal`, `${filePath}-shm`];
+}
+
+function removeDatabaseSidecars(filePath) {
+  for (const sidecar of databaseSidecars(filePath)) fs.rmSync(sidecar, { force: true });
+}
+
+async function backupDatabase(destination) {
+  const currentPath = getDatabasePath();
+  if (path.resolve(destination) === path.resolve(currentPath)) throw new Error('Elegí una ubicación diferente a la base activa.');
+  const database = getDatabase();
+  database.pragma('wal_checkpoint(TRUNCATE)');
+  const temporaryPath = `${destination}.tmp-${crypto.randomBytes(8).toString('hex')}`;
+  const previousPath = `${destination}.previous-${crypto.randomBytes(8).toString('hex')}`;
+  try {
+    await database.backup(temporaryPath);
+    removeDatabaseSidecars(temporaryPath);
+    if (fs.existsSync(destination)) fs.renameSync(destination, previousPath);
+    try {
+      fs.renameSync(temporaryPath, destination);
+    } catch (error) {
+      if (fs.existsSync(previousPath)) fs.renameSync(previousPath, destination);
+      throw error;
+    }
+    removeDatabaseSidecars(destination);
+    if (fs.existsSync(previousPath)) fs.rmSync(previousPath, { force: true });
+    return { filePath: destination };
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
+    removeDatabaseSidecars(temporaryPath);
+    if (fs.existsSync(previousPath)) fs.rmSync(previousPath, { force: true });
+  }
+}
+
+function closeDatabase() {
+  if (db) { db.close(); db = undefined; }
+}
+
+function restoreDatabase(sourcePath) {
+  const currentPath = getDatabasePath();
+  if (path.resolve(sourcePath) === path.resolve(currentPath)) throw new Error('Seleccioná un archivo de respaldo diferente a la base activa.');
+  validateDatabaseFile(sourcePath);
+  const temporaryPath = `${currentPath}.restore-${crypto.randomBytes(8).toString('hex')}`;
+  const previousPath = `${currentPath}.previous-${crypto.randomBytes(8).toString('hex')}`;
+  fs.copyFileSync(sourcePath, temporaryPath);
+  for (const suffix of ['-wal', '-shm']) {
+    const sourceSidecar = `${sourcePath}${suffix}`;
+    if (fs.existsSync(sourceSidecar)) fs.copyFileSync(sourceSidecar, `${temporaryPath}${suffix}`);
+  }
+  closeDatabase();
+  let currentMoved = false;
+  let replacementInstalled = false;
+  try {
+    removeDatabaseSidecars(currentPath);
+    fs.renameSync(currentPath, previousPath);
+    currentMoved = true;
+    fs.renameSync(temporaryPath, currentPath);
+    replacementInstalled = true;
+    getDatabase();
+    removeDatabaseSidecars(previousPath);
+    fs.rmSync(previousPath, { force: true });
+    return { restored: true };
+  } catch (error) {
+    try {
+      closeDatabase();
+      if (replacementInstalled && fs.existsSync(currentPath)) fs.rmSync(currentPath, { force: true });
+      removeDatabaseSidecars(currentPath);
+      if (currentMoved && fs.existsSync(previousPath)) fs.renameSync(previousPath, currentPath);
+      getDatabase();
+    } catch { /* preserve original error */ }
+    throw error;
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
+    removeDatabaseSidecars(temporaryPath);
   }
 }
 
@@ -349,4 +449,4 @@ function getDashboardSummary() {
   };
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDailyReport, getDashboardSummary, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, listExpenses, getDailyReport, getDashboardSummary, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

@@ -1,5 +1,6 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const database = require('./database.cjs');
 const XLSX = require('xlsx');
 const { buildWorkbook } = require('../scripts/export-report.cjs');
@@ -39,6 +40,24 @@ function registerIpc() {
   ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
   ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
   ipcMain.handle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
+  ipcMain.handle('database:backup', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showSaveDialog(win, { title: 'Crear copia de seguridad', defaultPath: 'pollo-caja-backup.sqlite', filters: [{ name: 'Base de datos SQLite', extensions: ['sqlite', 'db'] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    if (fs.existsSync(result.filePath)) {
+      const confirmation = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Cancelar', 'Reemplazar'], defaultId: 0, cancelId: 0, title: 'Reemplazar copia existente', message: 'Ya existe una copia en esa ubicación.', detail: '¿Querés reemplazarla de forma segura?', noLink: true });
+      if (confirmation.response !== 1) return { canceled: true };
+    }
+    return { canceled: false, ...(await database.backupDatabase(result.filePath)) };
+  });
+  ipcMain.handle('database:restore', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, { title: 'Restaurar copia de seguridad', properties: ['openFile'], filters: [{ name: 'Base de datos SQLite', extensions: ['sqlite', 'db'] }] });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    const confirmation = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Cancelar', 'Restaurar'], defaultId: 0, cancelId: 0, title: 'Confirmar restauración', message: 'La restauración reemplazará todos los datos actuales.', detail: 'Esta acción no se puede deshacer. Creá una copia antes de continuar.' });
+    if (confirmation.response !== 1) return { canceled: true };
+    return { canceled: false, ...database.restoreDatabase(result.filePaths[0]) };
+  });
   ipcMain.handle('report:export', async (_event, businessDate, format) => {
     const fs = require('node:fs/promises');
     const report = database.getDailyReport(businessDate);
