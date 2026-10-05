@@ -39,6 +39,7 @@ function registerIpc() {
   ipcMain.handle('expenses:create', (_event, input) => database.createExpense(input));
   ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
   ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
+  ipcMain.handle('dashboard:alerts', () => database.getDashboardAlerts());
   ipcMain.handle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
   ipcMain.handle('database:backup', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
