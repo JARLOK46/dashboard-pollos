@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+type DailyReport = { businessDate: string; orders: number; totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; paymentSplit: { cashCents: number; cardCents: number }; expenses: Array<{ category: string; total_cents: number; count: number }>; expensesTotalCents: number; cash: { openingCents: number | null; expectedCents: number | null; countedCents: number | null; differenceCents: number | null; status: string }; sales: unknown[] };
+
 type Product = {
   id: number; name: string; description: string; price_cents: number; cost_cents: number; stock: number; image_path: string | null;
 };
@@ -11,6 +13,7 @@ declare global {
       sales: { create(input: { totalCents: number; paymentMethod: 'cash' | 'card'; amountReceivedCents: number; changeCents: number; items: Array<{ productId: number; productName: string; quantity: number; unitPriceCents: number; subtotalCents: number }> }): Promise<unknown>; list(limit?: number, filters?: unknown): Promise<unknown[]>; analytics(filters: unknown): Promise<{ totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; orders: number; byDay: Array<{ day: string; total_cents: number; cost_cents: number; orders: number }> }>; get(id: number): Promise<unknown> };
       expenses: { create(input: unknown): Promise<unknown>; list(limit?: number): Promise<unknown[]> };
       dashboard: { summary(): Promise<unknown> };
+      report: { daily(businessDate: string): Promise<DailyReport>; export(businessDate: string, format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }> };
       export(format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }>;
       window: { minimize(): void; maximize(): void; close(): void; isMaximized(): Promise<boolean> };
       settings: { get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; update(input: { businessName: string; currency: string; lowStockThreshold: number }): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ changed: boolean }> };

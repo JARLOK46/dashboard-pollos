@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('salesApi', {
     list: (limit) => ipcRenderer.invoke('expenses:list', limit),
   },
   dashboard: { summary: () => ipcRenderer.invoke('dashboard:summary') },
+  report: { daily: (businessDate) => ipcRenderer.invoke('report:daily', businessDate), export: (businessDate, format) => ipcRenderer.invoke('report:export', businessDate, format) },
   export: (format) => ipcRenderer.invoke('export:data', format),
   window: { minimize: () => ipcRenderer.send('window:minimize'), maximize: () => ipcRenderer.send('window:maximize'), close: () => ipcRenderer.send('window:close'), isMaximized: () => ipcRenderer.invoke('window:is-maximized') },
   settings: { get: () => ipcRenderer.invoke('settings:get'), update: (input) => ipcRenderer.invoke('settings:update', input), changePassword: (input) => ipcRenderer.invoke('auth:change-password', input) },

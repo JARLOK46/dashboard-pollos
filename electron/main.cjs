@@ -38,6 +38,21 @@ function registerIpc() {
   ipcMain.handle('expenses:create', (_event, input) => database.createExpense(input));
   ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
   ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
+  ipcMain.handle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
+  ipcMain.handle('report:export', async (_event, businessDate, format) => {
+    const fs = require('node:fs/promises');
+    const report = database.getDailyReport(businessDate);
+    const extension = format === 'csv' ? 'csv' : 'xlsx';
+    const result = await dialog.showSaveDialog({ title: 'Exportar reporte diario', defaultPath: `reporte-${businessDate}.${extension}`, filters: [{ name: extension === 'csv' ? 'CSV' : 'Excel', extensions: [extension] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    if (extension === 'xlsx') XLSX.writeFile(buildWorkbook(report.sales, report.expenses, report), result.filePath);
+    else {
+      const rows = [['Reporte diario', businessDate], ['Ventas', report.totalCents / 100], ['Pedidos', report.orders], ['Efectivo', report.paymentSplit.cashCents / 100], ['Tarjeta', report.paymentSplit.cardCents / 100], ['Costo', report.costCents / 100], ['Ganancia bruta', report.grossProfitCents / 100], ['Margen %', report.marginPercent], ['Gastos', report.expensesTotalCents / 100], ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents / 100], ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents / 100], ['Contado caja', report.cash.countedCents == null ? '' : report.cash.countedCents / 100], ['Diferencia caja', report.cash.differenceCents == null ? '' : report.cash.differenceCents / 100], ['Estado caja', report.cash.status], [], ['Categoría', 'Total'], ...report.expenses.map((expense) => [expense.category, expense.total_cents / 100])];
+      const escape = (value) => `"${String(value).replaceAll('"', '""')}"`;
+      await fs.writeFile(result.filePath, rows.map((row) => row.map(escape).join(',')).join('\\n'), 'utf8');
+    }
+    return { canceled: false, filePath: result.filePath };
+  });
   ipcMain.handle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
   ipcMain.handle('cash:get', () => database.getCashRegister());
   ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));

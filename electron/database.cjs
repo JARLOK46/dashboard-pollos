@@ -319,6 +319,26 @@ function updateSettings(input) {
   return getSettings();
 }
 
+function getDailyReport(businessDate) {
+  if (typeof businessDate !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(businessDate)) throw new Error('La fecha del reporte no es válida.');
+  const database = getDatabase();
+  const sales = database.prepare("SELECT * FROM sales WHERE date(created_at, 'localtime') = date(?) ORDER BY datetime(created_at), id").all(businessDate);
+  const saleIds = sales.map((sale) => sale.id);
+  const items = saleIds.length ? database.prepare(`SELECT sale_id, COALESCE(SUM(cost_total_cents), 0) AS cost_cents FROM sale_items WHERE sale_id IN (${saleIds.map(() => '?').join(',')}) GROUP BY sale_id`).all(...saleIds) : [];
+  const costs = new Map(items.map((item) => [item.sale_id, item.cost_cents]));
+  const totalCents = sales.reduce((sum, sale) => sum + sale.total_cents, 0);
+  const costCents = sales.reduce((sum, sale) => sum + (costs.get(sale.id) || 0), 0);
+  const paymentRows = database.prepare("SELECT payment_method, COALESCE(SUM(total_cents), 0) AS total_cents, COUNT(*) AS orders FROM sales WHERE date(created_at, 'localtime') = date(?) GROUP BY payment_method").all(businessDate);
+  const paymentSplit = { cashCents: 0, cardCents: 0 };
+  for (const row of paymentRows) paymentSplit[row.payment_method === 'cash' ? 'cashCents' : 'cardCents'] = row.total_cents;
+  const expenses = database.prepare("SELECT category, COALESCE(SUM(amount_cents), 0) AS total_cents, COUNT(*) AS count FROM expenses WHERE date(created_at, 'localtime') = date(?) GROUP BY category ORDER BY total_cents DESC").all(businessDate);
+  const expensesTotalCents = expenses.reduce((sum, expense) => sum + expense.total_cents, 0);
+  const register = database.prepare('SELECT * FROM cash_registers WHERE business_date = ?').get(businessDate) || null;
+  const movements = register ? database.prepare('SELECT amount_cents FROM cash_movements WHERE register_id = ?').all(register.id) : [];
+  const expectedCents = register ? (register.expected_cents ?? movements.reduce((sum, movement) => sum + movement.amount_cents, 0)) : null;
+  return { businessDate, sales, orders: sales.length, totalCents, paymentSplit, expenses, expensesTotalCents, costCents, grossProfitCents: totalCents - costCents, marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0, cash: { openingCents: register?.opening_cents ?? null, expectedCents, countedCents: register?.counted_cents ?? null, differenceCents: register?.difference_cents ?? null, status: register?.status ?? 'not_open' } };
+}
+
 function getDashboardSummary() {
   const database = getDatabase();
   return {
@@ -329,4 +349,4 @@ function getDashboardSummary() {
   };
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDashboardSummary, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, createExpense, listExpenses, getDailyReport, getDashboardSummary, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister };
