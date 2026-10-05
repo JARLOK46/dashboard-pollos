@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "node scripts/merge-styles.cjs && tsc && vite build && node scripts/fix-dist-paths.cjs",
+    "build": "node scripts/merge-styles.cjs && node scripts/visual-polish.cjs && tsc && vite build && node scripts/fix-dist-paths.cjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "dist": "npm run build && electron-builder --win",
