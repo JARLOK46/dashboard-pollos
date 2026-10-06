@@ -300,8 +300,11 @@ function validateMoney(value, field) {
   if (!Number.isInteger(value) || value < 0 || value > 2147483647) throw new Error(`${field} no es válido.`);
 }
 function validateProductInput(input, updating = false) {
+  if (!input || typeof input !== 'object') throw new Error('Los datos del producto no son válidos.');
   if (updating && (!Number.isInteger(input.id) || input.id <= 0)) throw new Error('El producto no es válido.');
   if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120) throw new Error('El nombre del producto debe tener entre 1 y 120 caracteres.');
+  if (input.description != null && (typeof input.description !== 'string' || input.description.length > 500)) throw new Error('La descripción puede tener hasta 500 caracteres.');
+  if (input.imagePath != null && (typeof input.imagePath !== 'string' || input.imagePath.length > 7 * 1024 * 1024 || !input.imagePath.startsWith('data:image/'))) throw new Error('La imagen del producto no es válida.');
   validateMoney(input.priceCents, 'El precio');
   validateMoney(input.costCents ?? 0, 'El costo');
   if (!Number.isInteger(input.stock) || input.stock < 0 || input.stock > 2147483647) throw new Error('El stock no es válido.');
