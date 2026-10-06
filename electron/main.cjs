@@ -38,7 +38,8 @@ async function analyzeWithOllama(question) {
   const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones. Pregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
   if (prompt.length > AI_LIMITS.prompt) throw new Error('El resumen de datos excede el límite permitido.');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  // Cloud models, especially larger variants, may need more than 30 seconds to start and generate a response.
+  const timer = setTimeout(() => controller.abort(), 120000);
   try {
     const response = await fetch(OLLAMA_URL, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.model, messages: [{ role: 'user', content: prompt }], stream: false }) });
     if (!response.ok) throw new Error(`Ollama Cloud rechazó la solicitud (HTTP ${response.status}).`);
@@ -47,7 +48,7 @@ async function analyzeWithOllama(question) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('Ollama Cloud devolvió una respuesta inválida.');
     return { text: text.trim(), timestamp: new Date().toISOString(), model: settings.model };
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('La consulta a Ollama Cloud agotó el tiempo de espera.');
+    if (error?.name === 'AbortError') throw new Error('Ollama Cloud tardó más de 2 minutos en responder. Probá con un modelo más liviano como gpt-oss:20b o revisá tu conexión.');
     if (error?.message?.startsWith('Ollama Cloud') || error?.message?.startsWith('La consulta') || error?.message?.startsWith('Ollama Cloud devolvió')) throw error;
     throw new Error('No se pudo conectar con Ollama Cloud.');
   } finally { clearTimeout(timer); }
