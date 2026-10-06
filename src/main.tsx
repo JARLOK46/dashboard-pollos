@@ -54,12 +54,14 @@ function AIChat() {
   const [error, setError] = useState('');
   const [configured, setConfigured] = useState<boolean | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
   const suggestions = ['¿Cómo fueron las ventas de hoy?', '¿Qué productos tienen poco stock?', '¿Cuál fue mi ganancia esta semana?'];
 
   useEffect(() => {
     window.salesApi.ai.getConfig().then(config => setConfigured(config.configured)).catch(() => setConfigured(null));
   }, []);
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+  useEffect(() => { if (open) chatBodyRef.current?.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, busy, open]);
   const send = async (value = question) => {
     const text = value.trim();
     if (!text || busy) return;
@@ -76,7 +78,7 @@ function AIChat() {
   return <>
     {open && <section className="ai-chat-panel" role="dialog" aria-modal="false" aria-labelledby="ai-chat-title">
       <div className="ai-chat-header"><div><strong id="ai-chat-title">Asistente de Pollo &amp; Caja</strong><span>Consultas sobre tu operación</span></div><button type="button" className="ai-close" aria-label="Cerrar asistente" onClick={() => setOpen(false)}>×</button></div>
-      <div className="ai-chat-body" aria-live="polite">
+      <div ref={chatBodyRef} className="ai-chat-body" aria-live="polite">
         {!messages.length && <div className="ai-empty"><div className="ai-empty-icon">✦</div><h3>¿En qué te ayudo?</h3><p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p><div className="ai-suggestions">{suggestions.map(item => <button type="button" key={item} onClick={() => send(item)}>{item}</button>)}</div></div>}
         {messages.map((message, index) => <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}><span className="ai-message-content">{formatAIOutput(message.text)}</span></div>)}
         {busy && <div className="ai-message assistant ai-loading" aria-label="El asistente está pensando"><span>Analizando<span className="ai-dots">…</span></span></div>}
