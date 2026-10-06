@@ -31,4 +31,16 @@ function clearApiKey() {
 function getStatus() {
   return { configured: hasApiKey(), safeStorageAvailable: safeStorage.isEncryptionAvailable() };
 }
-module.exports = { saveApiKey, clearApiKey, getStatus };
+function getApiKey() {
+  requireAvailable();
+  if (!hasApiKey()) throw new Error('No hay una clave de API de Ollama Cloud configurada.');
+  try {
+    const encrypted = fs.readFileSync(keyPath());
+    const key = safeStorage.decryptString(encrypted);
+    return validateKey(key);
+  } catch (error) {
+    if (error?.message?.includes('No hay una clave')) throw error;
+    throw new Error('No se pudo leer la clave de API almacenada de forma segura.');
+  }
+}
+module.exports = { saveApiKey, clearApiKey, getStatus, getApiKey };

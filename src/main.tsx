@@ -32,7 +32,50 @@ function App() {
   const navigate = (next: Page) => setPage(next);
   if (!authenticated) return <><TitleBar /><Login onLogin={(email) => { setAdminEmail(email); setAuthenticated(true); }} /></>;
   const logout = () => { setAuthenticated(false); setPage('dashboard'); setAlerts([]); setProducts([]); setSales([]); setSummary(null); };
-  return <div className={darkMode ? 'app-shell dark-theme' : 'app-shell'}><TitleBar /><div className="theme-shell" /><Sidebar page={page} navigate={navigate} /><main className="main-content"><header className={`topbar ${page === 'dashboard' ? 'service-pulse' : ''}`}><div><p className="eyebrow">{today().toUpperCase()}</p><h1>{page === 'dashboard' ? `Buen día, ${settings.businessName} 👋` : page === 'products' ? 'Productos' : page === 'checkout' ? 'Nueva venta' : page === 'settings' ? 'Configuración' : page === 'reports' ? 'Reportes' : 'Historial de ventas'}</h1><p className="subtitle">{page === 'dashboard' ? 'Este es el resumen de tu negocio hoy.' : 'Gestioná tu operación de forma simple y rápida.'}</p></div><div className="top-actions"><NotificationCenter alerts={alerts} navigate={navigate} /><button className="theme-toggle" title={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'} onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀' : '☾'}</button><ProfileMenu email={adminEmail} navigate={navigate} onLogout={logout} /></div></header>{page === 'dashboard' && <Dashboard summary={summary} sales={sales} navigate={navigate} />}{page === 'products' && <Products products={products} refresh={refresh} navigate={navigate} />}{page === 'checkout' && <Checkout products={products} onSaved={async () => { await refresh(); navigate('history'); }} />}{page === 'history' && <History sales={sales} onVoided={refresh} />}{page === 'reports' && <Reports />}{page === 'expenses' && <Expenses onChanged={refresh} />}{page === 'cash' && <CashRegister onChanged={refresh} />}{page === 'settings' && <Settings settings={settings} onSaved={async () => { await refresh(); }} />}</main></div>;
+  return <div className={darkMode ? 'app-shell dark-theme' : 'app-shell'}><TitleBar /><div className="theme-shell" /><Sidebar page={page} navigate={navigate} /><main className="main-content"><header className={`topbar ${page === 'dashboard' ? 'service-pulse' : ''}`}><div><p className="eyebrow">{today().toUpperCase()}</p><h1>{page === 'dashboard' ? `Buen día, ${settings.businessName} 👋` : page === 'products' ? 'Productos' : page === 'checkout' ? 'Nueva venta' : page === 'settings' ? 'Configuración' : page === 'reports' ? 'Reportes' : 'Historial de ventas'}</h1><p className="subtitle">{page === 'dashboard' ? 'Este es el resumen de tu negocio hoy.' : 'Gestioná tu operación de forma simple y rápida.'}</p></div><div className="top-actions"><NotificationCenter alerts={alerts} navigate={navigate} /><button className="theme-toggle" title={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'} onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀' : '☾'}</button><ProfileMenu email={adminEmail} navigate={navigate} onLogout={logout} /></div></header>{page === 'dashboard' && <Dashboard summary={summary} sales={sales} navigate={navigate} />}{page === 'products' && <Products products={products} refresh={refresh} navigate={navigate} />}{page === 'checkout' && <Checkout products={products} onSaved={async () => { await refresh(); navigate('history'); }} />}{page === 'history' && <History sales={sales} onVoided={refresh} />}{page === 'reports' && <Reports />}{page === 'expenses' && <Expenses onChanged={refresh} />}{page === 'cash' && <CashRegister onChanged={refresh} />}{page === 'settings' && <Settings settings={settings} onSaved={async () => { await refresh(); }} />}</main><AIChat /></div>;
+}
+function AIChat() {
+  type Message = { role: 'user' | 'assistant'; text: string };
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const suggestions = ['¿Cómo fueron las ventas de hoy?', '¿Qué productos tienen poco stock?', '¿Cuál fue mi ganancia esta semana?'];
+
+  useEffect(() => {
+    window.salesApi.ai.getConfig().then(config => setConfigured(config.configured)).catch(() => setConfigured(null));
+  }, []);
+  useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+  const send = async (value = question) => {
+    const text = value.trim();
+    if (!text || busy) return;
+    setQuestion(''); setError(''); setMessages(previous => [...previous, { role: 'user', text }]); setBusy(true);
+    try {
+      const answer = await window.salesApi.ai.analyze(text);
+      setMessages(previous => [...previous, { role: 'assistant', text: answer.text }]);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.';
+      setError(message);
+      setMessages(previous => [...previous, { role: 'assistant', text: 'No pude responder en este momento. Revisá la configuración de Ollama Cloud o intentá nuevamente.' }]);
+    } finally { setBusy(false); }
+  };
+  return <>
+    {open && <section className="ai-chat-panel" role="dialog" aria-modal="false" aria-labelledby="ai-chat-title">
+      <div className="ai-chat-header"><div><strong id="ai-chat-title">Asistente de Pollo &amp; Caja</strong><span>Consultas sobre tu operación</span></div><button type="button" className="ai-close" aria-label="Cerrar asistente" onClick={() => setOpen(false)}>×</button></div>
+      <div className="ai-chat-body" aria-live="polite">
+        {!messages.length && <div className="ai-empty"><div className="ai-empty-icon">✦</div><h3>¿En qué te ayudo?</h3><p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p><div className="ai-suggestions">{suggestions.map(item => <button type="button" key={item} onClick={() => send(item)}>{item}</button>)}</div></div>}
+        {messages.map((message, index) => <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.text}</span></div>)}
+        {busy && <div className="ai-message assistant ai-loading" aria-label="El asistente está pensando"><span>Analizando<span className="ai-dots">…</span></span></div>}
+        {error && <p className="ai-error" role="alert">{configured === false ? 'La clave de Ollama Cloud no está configurada. Podés agregarla en Configuración → IA.' : error}</p>}
+      </div>
+      <p className="ai-disclaimer">Solo lectura: el asistente no modifica ventas, stock ni configuración.</p>
+      <form className="ai-chat-form" onSubmit={event => { event.preventDefault(); void send(); }}><label className="sr-only" htmlFor="ai-question">Escribí tu pregunta</label><input id="ai-question" ref={inputRef} value={question} onChange={event => setQuestion(event.target.value)} placeholder="Escribí una pregunta…" disabled={busy} /><button type="submit" aria-label="Enviar pregunta" disabled={busy || !question.trim()}>↑</button></form>
+    </section>}
+    <button type="button" className={`ai-fab ${open ? 'is-open' : ''}`} aria-label={open ? 'Cerrar asistente de IA' : 'Abrir asistente de IA'} aria-expanded={open} onClick={() => setOpen(value => !value)}><span>✦</span><b>IA</b></button>
+  </>;
 }
 function TitleBar() { return <div className="title-bar"><div className="title-bar-brand"><div className="brand-mark small">P</div><strong>Pollo &amp; Caja</strong></div><div className="window-controls"><button onClick={() => window.salesApi.window.minimize()}>−</button><button onClick={() => window.salesApi.window.maximize()}>□</button><button className="close-control" onClick={() => window.salesApi.window.close()}>×</button></div></div> }
 function NotificationCenter({ alerts, navigate }: { alerts: DashboardAlert[]; navigate: (page: Page) => void }) {

@@ -6,6 +6,53 @@ const credentials = require('./credentials.cjs');
 const XLSX = require('xlsx');
 const { buildWorkbook } = require('../scripts/export-report.cjs');
 
+const AI_LIMITS = { question: 2000, prompt: 12000, sales: 30, products: 100, expenses: 30 };
+const OLLAMA_URL = 'https://ollama.com/api/chat';
+function sanitizeSnapshot(value) {
+  if (Array.isArray(value)) return value.map(sanitizeSnapshot);
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!['image_path', 'notes', 'customer_name', 'void_reason', 'amount_received_cents', 'change_cents'].includes(key)) result[key] = sanitizeSnapshot(item);
+  }
+  return result;
+}
+function buildAiSnapshot() {
+  const today = new Date().toISOString().slice(0, 10);
+  const analytics = database.getSalesAnalytics({ from: today, to: today });
+  return sanitizeSnapshot({
+    ventasHoy: { resumen: { totalCents: analytics.totalCents, costCents: analytics.costCents, grossProfitCents: analytics.grossProfitCents, marginPercent: analytics.marginPercent, orders: analytics.orders }, porDia: analytics.byDay, porPago: analytics.byPayment, porProducto: analytics.byProduct },
+    ventasRecientes: database.listSales(AI_LIMITS.sales).slice(0, AI_LIMITS.sales),
+    productos: database.listProducts().slice(0, AI_LIMITS.products).map(({ id, name, price_cents, cost_cents, stock }) => ({ id, name, price_cents, cost_cents, stock, margin_percent: price_cents ? ((price_cents - cost_cents) / price_cents) * 100 : 0 })),
+    gastosRecientes: database.listExpenses(AI_LIMITS.expenses).slice(0, AI_LIMITS.expenses),
+    reporteCajaHoy: database.getDailyReport(today),
+  });
+}
+async function analyzeWithOllama(question) {
+  if (typeof question !== 'string' || !question.trim()) throw new Error('La pregunta es obligatoria.');
+  if (question.trim().length > AI_LIMITS.question) throw new Error('La pregunta es demasiado larga.');
+  const settings = database.getOllamaSettings();
+  if (!settings.model) throw new Error('El modelo seleccionado no es válido.');
+  const key = credentials.getApiKey();
+  const snapshot = buildAiSnapshot();
+  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones. Pregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
+  if (prompt.length > AI_LIMITS.prompt) throw new Error('El resumen de datos excede el límite permitido.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(OLLAMA_URL, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.model, messages: [{ role: 'user', content: prompt }], stream: false }) });
+    if (!response.ok) throw new Error(`Ollama Cloud rechazó la solicitud (HTTP ${response.status}).`);
+    const payload = await response.json();
+    const text = payload?.message?.content;
+    if (typeof text !== 'string' || !text.trim()) throw new Error('Ollama Cloud devolvió una respuesta inválida.');
+    return { text: text.trim(), timestamp: new Date().toISOString(), model: settings.model };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('La consulta a Ollama Cloud agotó el tiempo de espera.');
+    if (error?.message?.startsWith('Ollama Cloud') || error?.message?.startsWith('La consulta') || error?.message?.startsWith('Ollama Cloud devolvió')) throw error;
+    throw new Error('No se pudo conectar con Ollama Cloud.');
+  } finally { clearTimeout(timer); }
+}
+
 const isDev = !app.isPackaged;
 
 function createWindow() {
@@ -87,6 +134,7 @@ function registerIpc() {
   ipcMain.handle('ai:set-key', (_event, key) => { const result = credentials.saveApiKey(key); database.updateOllamaConfigured(true); return { ...database.getOllamaSettings(), ...result }; });
   ipcMain.handle('ai:clear-key', () => { const result = credentials.clearApiKey(); database.updateOllamaConfigured(false); return { ...database.getOllamaSettings(), ...result }; });
   ipcMain.handle('ai:save-model', (_event, model) => database.saveOllamaModel(model));
+  ipcMain.handle('ai:analyze', (_event, question) => analyzeWithOllama(question));
   ipcMain.handle('auth:login', (_event, input) => database.authenticateAdmin(input?.email, input?.password));
   ipcMain.handle('auth:change-password', (_event, input) => database.changeAdminPassword(input?.currentPassword, input?.newPassword));
   ipcMain.handle('export:data', async (_event, format) => {
