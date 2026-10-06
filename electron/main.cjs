@@ -32,12 +32,16 @@ function registerIpc() {
   ipcMain.handle('products:list', () => database.listProducts());
   ipcMain.handle('products:create', (_event, input) => database.createProduct(input));
   ipcMain.handle('products:update', (_event, input) => database.updateProduct(input));
+  ipcMain.handle('products:adjust-stock', (_event, input) => database.adjustProductStock(input));
+  ipcMain.handle('products:movements', (_event, productId, limit, filters) => database.listInventoryMovements(productId, limit, filters));
   ipcMain.handle('sales:create', (_event, input) => database.createSale(input));
+  ipcMain.handle('sales:void', (_event, id, reason) => database.voidSale(id, reason));
   ipcMain.handle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
   ipcMain.handle('sales:analytics', (_event, filters) => database.getSalesAnalytics(filters));
   ipcMain.handle('sales:get', (_event, id) => database.getSale(id));
   ipcMain.handle('expenses:create', (_event, input) => database.createExpense(input));
   ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
+  ipcMain.handle('cash:withdraw', (_event, input) => database.createWithdrawal(input));
   ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
   ipcMain.handle('dashboard:alerts', () => database.getDashboardAlerts());
   ipcMain.handle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
@@ -67,7 +71,7 @@ function registerIpc() {
     if (result.canceled || !result.filePath) return { canceled: true };
     if (extension === 'xlsx') XLSX.writeFile(buildWorkbook(report.sales, report.expenses, report), result.filePath);
     else {
-      const rows = [['Reporte diario', businessDate], ['Ventas', report.totalCents / 100], ['Pedidos', report.orders], ['Efectivo', report.paymentSplit.cashCents / 100], ['Tarjeta', report.paymentSplit.cardCents / 100], ['Costo', report.costCents / 100], ['Ganancia bruta', report.grossProfitCents / 100], ['Margen %', report.marginPercent], ['Gastos', report.expensesTotalCents / 100], ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents / 100], ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents / 100], ['Contado caja', report.cash.countedCents == null ? '' : report.cash.countedCents / 100], ['Diferencia caja', report.cash.differenceCents == null ? '' : report.cash.differenceCents / 100], ['Estado caja', report.cash.status], [], ['Categoría', 'Total'], ...report.expenses.map((expense) => [expense.category, expense.total_cents / 100])];
+      const rows = [['Reporte diario', businessDate], ['Ventas', report.totalCents / 100], ['Pedidos', report.orders], ['Efectivo', report.paymentSplit.cashCents / 100], ['Tarjeta', report.paymentSplit.cardCents / 100], ['Costo', report.costCents / 100], ['Ganancia bruta', report.grossProfitCents / 100], ['Margen %', report.marginPercent], ['Gastos', report.expensesTotalCents / 100], ['Retiros de efectivo', report.withdrawalsTotalCents / 100], ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents / 100], ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents / 100], ['Contado caja', report.cash.countedCents == null ? '' : report.cash.countedCents / 100], ['Diferencia caja', report.cash.differenceCents == null ? '' : report.cash.differenceCents / 100], ['Estado caja', report.cash.status], [], ['Categoría', 'Total'], ...report.expenses.map((expense) => [expense.category, expense.total_cents / 100])];
       const escape = (value) => `"${String(value).replaceAll('"', '""')}"`;
       await fs.writeFile(result.filePath, rows.map((row) => row.map(escape).join(',')).join('\\n'), 'utf8');
     }

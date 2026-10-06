@@ -218,7 +218,7 @@ button:disabled {
   font-weight:700;
   margin:13px 0
 }
-.modal input,.cash-input input {
+.modal input,.modal textarea,.cash-input input {
   width:100%;
   display:block;
   border:1px solid #e3e7ec;
@@ -227,15 +227,35 @@ button:disabled {
   margin-top:6px;
   font:inherit;
   font-weight:400;
-  outline:none
+  outline:none;
+  background:#fff;
+  color:inherit
 }
-.modal input:focus,.cash-input input:focus {
-  border-color:#f97316
+.modal textarea {
+  min-height:76px;
+  resize:vertical
+}
+.modal input:focus,.modal textarea:focus,.cash-input input:focus {
+  border-color:#f97316;
+  box-shadow:0 0 0 3px rgba(249,115,22,.1)
 }
 .form-row {
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:repeat(3,minmax(0,1fr));
   gap:12px
+}
+.field-hint {
+  display:block;
+  color:#9ba4af;
+  font-size:11px;
+  font-weight:400;
+  margin-top:5px
+}
+.image-preview-wrap {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:8px
 }
 .image-preview {
   height:70px;
@@ -1072,7 +1092,7 @@ button:disabled {
 .dark-theme .product-image,.dark-theme .picker-card .product-thumb {
   background:linear-gradient(135deg,#263443,#322a2a)
 }
-.dark-theme .analytics-toolbar input,.dark-theme .history-filterbar input,.dark-theme .history-filterbar select,.dark-theme .modal input,.dark-theme .cash-action input,.dark-theme .login-card input {
+.dark-theme .analytics-toolbar input,.dark-theme .history-filterbar input,.dark-theme .history-filterbar select,.dark-theme .modal input,.dark-theme .modal textarea,.dark-theme .cash-action input,.dark-theme .login-card input {
   background:#202c3b;
   border-color:#3a485b;
   color:#edf2f7
@@ -1364,7 +1384,7 @@ body {
 .login-card label,.cash-action label,.modal label {
   font-size:12px
 }
-.login-card input,.cash-action input,.modal input {
+.login-card input,.cash-action input,.modal input,.modal textarea {
   font-size:14px;
   padding:12px
 }
@@ -1549,7 +1569,7 @@ html {
 .login-card label,.cash-action label,.modal label {
   font-size:13px
 }
-.login-card input,.cash-action input,.modal input {
+.login-card input,.cash-action input,.modal input,.modal textarea {
   font-size:15px;
   padding:13px
 }

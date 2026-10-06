@@ -7,8 +7,8 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
-const SCHEMA_VERSION = 1;
-const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users'];
+const SCHEMA_VERSION = 3;
+const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'sale_voids', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users', 'inventory_movements'];
 
 let db;
 
@@ -49,6 +49,15 @@ function migrate(database) {
       change_cents INTEGER NOT NULL DEFAULT 0 CHECK (change_cents >= 0),
       customer_name TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'voided')),
+      voided_at TEXT,
+      void_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS sale_voids (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -94,6 +103,18 @@ function migrate(database) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity_delta INTEGER NOT NULL CHECK (quantity_delta <> 0),
+      stock_before INTEGER NOT NULL CHECK (stock_before >= 0),
+      stock_after INTEGER NOT NULL CHECK (stock_after >= 0),
+      type TEXT NOT NULL CHECK (type IN ('sale', 'return', 'adjustment', 'entry')),
+      reason TEXT NOT NULL,
+      reference_type TEXT,
+      reference_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL UNIQUE,
@@ -108,9 +129,15 @@ function migrate(database) {
       ('lowStockThreshold', '10');
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
+    CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created ON inventory_movements(product_id, datetime(created_at) DESC, id DESC);
   `);
   const productColumns = database.prepare('PRAGMA table_info(products)').all().map((column) => column.name);
   if (!productColumns.includes('cost_cents')) database.exec('ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (cost_cents >= 0)');
+  const saleColumns = database.prepare('PRAGMA table_info(sales)').all().map((column) => column.name);
+  if (!saleColumns.includes('status')) database.exec("ALTER TABLE sales ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+  if (!saleColumns.includes('voided_at')) database.exec('ALTER TABLE sales ADD COLUMN voided_at TEXT');
+  if (!saleColumns.includes('void_reason')) database.exec('ALTER TABLE sales ADD COLUMN void_reason TEXT');
+  database.exec('CREATE TABLE IF NOT EXISTS sale_voids (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id) ON DELETE CASCADE, reason TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
   const saleItemColumns = database.prepare('PRAGMA table_info(sale_items)').all().map((column) => column.name);
   if (!saleItemColumns.includes('unit_cost_cents')) database.exec('ALTER TABLE sale_items ADD COLUMN unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (unit_cost_cents >= 0)');
   if (!saleItemColumns.includes('cost_total_cents')) database.exec('ALTER TABLE sale_items ADD COLUMN cost_total_cents INTEGER NOT NULL DEFAULT 0 CHECK (cost_total_cents >= 0)');
@@ -273,23 +300,64 @@ function validateMoney(value, field) {
   if (!Number.isInteger(value) || value < 0 || value > 2147483647) throw new Error(`${field} no es válido.`);
 }
 function validateProductInput(input, updating = false) {
+  if (!input || typeof input !== 'object') throw new Error('Los datos del producto no son válidos.');
   if (updating && (!Number.isInteger(input.id) || input.id <= 0)) throw new Error('El producto no es válido.');
   if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120) throw new Error('El nombre del producto debe tener entre 1 y 120 caracteres.');
+  if (input.description != null && (typeof input.description !== 'string' || input.description.length > 500)) throw new Error('La descripción puede tener hasta 500 caracteres.');
+  if (input.imagePath != null && (typeof input.imagePath !== 'string' || input.imagePath.length > 7 * 1024 * 1024 || !input.imagePath.startsWith('data:image/'))) throw new Error('La imagen del producto no es válida.');
   validateMoney(input.priceCents, 'El precio');
   validateMoney(input.costCents ?? 0, 'El costo');
   if (!Number.isInteger(input.stock) || input.stock < 0 || input.stock > 2147483647) throw new Error('El stock no es válido.');
 }
 function createProduct(input) {
   validateProductInput(input);
-  const result = getDatabase().prepare(`INSERT INTO products (name, description, price_cents, cost_cents, stock, image_path) VALUES (?, ?, ?, ?, ?, ?)`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null);
-  return getDatabase().prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid);
+  const database = getDatabase();
+  const result = database.transaction(() => {
+    const created = database.prepare(`INSERT INTO products (name, description, price_cents, cost_cents, stock, image_path) VALUES (?, ?, ?, ?, ?, ?)`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null);
+    if (input.stock > 0) database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) VALUES (?, ?, 0, ?, 'entry', 'Stock inicial', 'product', ?)`).run(created.lastInsertRowid, input.stock, input.stock, created.lastInsertRowid);
+    return created.lastInsertRowid;
+  })();
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(result);
 }
 
 function updateProduct(input) {
   validateProductInput(input, true);
-  const result = getDatabase().prepare(`UPDATE products SET name = ?, description = ?, price_cents = ?, cost_cents = ?, stock = ?, image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null, input.id);
+  const database = getDatabase();
+  const result = database.transaction(() => {
+    const current = database.prepare('SELECT stock FROM products WHERE id = ?').get(input.id);
+    if (!current) throw new Error('El producto no existe.');
+    const updated = database.prepare(`UPDATE products SET name = ?, description = ?, price_cents = ?, cost_cents = ?, stock = ?, image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null, input.id);
+    const delta = input.stock - current.stock;
+    if (delta) database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) VALUES (?, ?, ?, ?, 'adjustment', 'Edición manual del producto', 'product', ?)`).run(input.id, delta, current.stock, input.stock, input.id);
+    return updated;
+  })();
   if (!result.changes) throw new Error('El producto no existe.');
-  return getDatabase().prepare('SELECT * FROM products WHERE id = ?').get(input.id);
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(input.id);
+}
+
+function adjustProductStock(input) {
+  if (!Number.isInteger(input?.productId) || input.productId <= 0) throw new Error('El producto no es válido.');
+  if (!Number.isInteger(input.quantityDelta) || input.quantityDelta === 0 || Math.abs(input.quantityDelta) > 2147483647) throw new Error('La cantidad de ajuste no es válida.');
+  if (typeof input.reason !== 'string' || !input.reason.trim() || input.reason.trim().length > 200) throw new Error('El motivo es obligatorio y debe tener hasta 200 caracteres.');
+  const database = getDatabase();
+  const result = database.transaction(() => {
+    const product = database.prepare('SELECT stock FROM products WHERE id = ? AND active = 1').get(input.productId);
+    if (!product) throw new Error('El producto no existe.');
+    const next = product.stock + input.quantityDelta;
+    if (next < 0) throw new Error('El ajuste no puede dejar el stock en negativo.');
+    database.prepare('UPDATE products SET stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, input.productId);
+    database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) VALUES (?, ?, ?, ?, ?, ?, 'manual', NULL)`).run(input.productId, input.quantityDelta, product.stock, next, input.quantityDelta > 0 ? 'entry' : 'adjustment', input.reason.trim());
+  })();
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(input.productId);
+}
+
+function listInventoryMovements(productId, limit = 200, filters = {}) {
+  const database = getDatabase();
+  const conditions = []; const params = [];
+  if (Number.isInteger(productId) && productId > 0) { conditions.push('m.product_id = ?'); params.push(productId); }
+  if (filters.type && filters.type !== 'all') { conditions.push('m.type = ?'); params.push(filters.type); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return database.prepare(`SELECT m.*, p.name AS product_name FROM inventory_movements m JOIN products p ON p.id = m.product_id ${where} ORDER BY datetime(m.created_at) DESC, m.id DESC LIMIT ?`).all(...params, limit);
 }
 
 function createSale(input) {
@@ -304,6 +372,7 @@ function createSale(input) {
     const sale = database.prepare(`INSERT INTO sales (total_cents, payment_method, amount_received_cents, change_cents, customer_name, notes) VALUES (?, ?, ?, ?, ?, ?)`).run(input.totalCents, input.paymentMethod, input.amountReceivedCents, input.changeCents, input.customerName || '', input.notes || '');
     const insertItem = database.prepare(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price_cents, subtotal_cents, unit_cost_cents, cost_total_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     const updateStock = database.prepare('UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND stock >= ?');
+    const insertInventoryMovement = database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) SELECT ?, ?, stock + ?, stock, 'sale', ?, 'sale', ? FROM products WHERE id = ?`);
     const findProduct = database.prepare('SELECT id, name, price_cents, cost_cents FROM products WHERE id = ? AND active = 1');
     const movement = database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('sale', ?, ?, ?, ?)`);
     let calculatedTotal = 0;
@@ -317,6 +386,7 @@ function createSale(input) {
       calculatedTotal += subtotal;
       const changed = updateStock.run(item.quantity, item.productId, item.quantity);
       if (changed.changes !== 1) throw new Error(`Insufficient stock for product ${item.productId}`);
+      insertInventoryMovement.run(item.productId, -item.quantity, item.quantity, `Venta #${sale.lastInsertRowid}`, sale.lastInsertRowid, item.productId);
       insertItem.run(sale.lastInsertRowid, product.id, product.name, item.quantity, item.unitPriceCents, subtotal, product.cost_cents, product.cost_cents * item.quantity);
     }
     if (calculatedTotal !== input.totalCents) throw new Error('El total de la venta no es válido.');
@@ -328,9 +398,33 @@ function createSale(input) {
   return getSale(Number(create));
 }
 
+function voidSale(id, reason) {
+  if (!Number.isInteger(id) || id <= 0) throw new Error('La venta no es válida.');
+  if (typeof reason !== 'string' || !reason.trim() || reason.trim().length > 500) throw new Error('El motivo es obligatorio y debe tener hasta 500 caracteres.');
+  const database = getDatabase();
+  database.transaction(() => {
+    const sale = database.prepare("SELECT * FROM sales WHERE id = ?").get(id);
+    if (!sale) throw new Error('La venta no existe.');
+    if (sale.status === 'voided') return;
+    // Claim the active sale before reversing anything. SQLite serializes this transaction,
+    // and the conditional update makes retries/concurrent requests idempotent.
+    const claimed = database.prepare("UPDATE sales SET status = 'voided', voided_at = CURRENT_TIMESTAMP, void_reason = ? WHERE id = ? AND status = 'active'").run(reason.trim(), id);
+    if (claimed.changes !== 1) return;
+    const items = database.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').all(id);
+    const restore = database.prepare('UPDATE products SET stock = stock + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+    for (const item of items) restore.run(item.quantity, item.product_id);
+    database.prepare('INSERT INTO sale_voids (sale_id, reason) VALUES (?, ?)').run(id, reason.trim());
+    if (sale.payment_method === 'cash') {
+      const movement = database.prepare("SELECT register_id FROM cash_movements WHERE type = 'sale' AND reference_id = ? ORDER BY id LIMIT 1").get(id);
+      if (movement) database.prepare("INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('adjustment', ?, ?, ?, ?)").run(-sale.total_cents, id, movement.register_id, `Void sale #${id}`);
+    }
+  })();
+  return getSale(id);
+}
+
 function getSale(id) {
   const database = getDatabase();
-  const sale = database.prepare('SELECT * FROM sales WHERE id = ?').get(id);
+  const sale = database.prepare('SELECT s.*, v.reason AS void_record_reason, v.created_at AS void_recorded_at FROM sales s LEFT JOIN sale_voids v ON v.sale_id = s.id WHERE s.id = ?').get(id);
   if (!sale) return null;
   return { ...sale, items: database.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(id) };
 }
@@ -341,15 +435,16 @@ function listSales(limit = 100, filters = {}) {
   if (filters.from) { conditions.push("date(s.created_at) >= date(?)"); params.push(filters.from); }
   if (filters.to) { conditions.push("date(s.created_at) <= date(?)"); params.push(filters.to); }
   if (filters.paymentMethod && filters.paymentMethod !== 'all') { conditions.push('s.payment_method = ?'); params.push(filters.paymentMethod); }
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  conditions.unshift("s.status = 'active'");
+  const where = `WHERE ${conditions.join(' AND ')}`;
   return database.prepare(`SELECT s.* FROM sales s ${where} ORDER BY datetime(s.created_at) DESC LIMIT ?`).all(...params, limit).map((sale) => ({ ...sale, items: database.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(sale.id) }));
 }
 function getSalesAnalytics(filters = {}) {
   const database = getDatabase();
   const sales = listSales(10000, filters);
-  const byDay = database.prepare(`SELECT date(created_at) AS day, COALESCE(SUM(total_cents),0) AS total_cents, COALESCE((SELECT SUM(i.cost_total_cents) FROM sale_items i WHERE i.sale_id IN (SELECT id FROM sales WHERE date(created_at) = date(s.created_at))),0) AS cost_cents, COUNT(*) AS orders FROM sales s WHERE date(created_at) BETWEEN date(?) AND date(?) GROUP BY date(created_at) ORDER BY day`).all(filters.from, filters.to);
-  const byPayment = database.prepare(`SELECT payment_method, COALESCE(SUM(total_cents),0) AS total_cents, COUNT(*) AS orders FROM sales WHERE date(created_at) BETWEEN date(?) AND date(?) GROUP BY payment_method`).all(filters.from, filters.to);
-  const byProduct = database.prepare(`SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents, SUM(cost_total_cents) AS cost_cents, SUM(subtotal_cents - cost_total_cents) AS gross_profit_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE date(s.created_at) BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY total_cents DESC LIMIT 5`).all(filters.from, filters.to);
+  const byDay = database.prepare(`SELECT date(s.created_at) AS day, COALESCE(SUM(s.total_cents),0) AS total_cents, COALESCE((SELECT SUM(i.cost_total_cents) FROM sale_items i WHERE i.sale_id IN (SELECT id FROM sales WHERE status = 'active' AND date(created_at) = date(s.created_at))),0) AS cost_cents, COUNT(*) AS orders FROM sales s WHERE s.status = 'active' AND date(s.created_at) BETWEEN date(?) AND date(?) GROUP BY date(s.created_at) ORDER BY day`).all(filters.from, filters.to);
+  const byPayment = database.prepare(`SELECT payment_method, COALESCE(SUM(total_cents),0) AS total_cents, COUNT(*) AS orders FROM sales WHERE status = 'active' AND date(created_at) BETWEEN date(?) AND date(?) GROUP BY payment_method`).all(filters.from, filters.to);
+  const byProduct = database.prepare(`SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents, SUM(cost_total_cents) AS cost_cents, SUM(subtotal_cents - cost_total_cents) AS gross_profit_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE s.status = 'active' AND date(s.created_at) BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY total_cents DESC LIMIT 5`).all(filters.from, filters.to);
   const totalCents = sales.reduce((sum, sale) => sum + sale.total_cents, 0);
   const costCents = sales.reduce((sum, sale) => sum + sale.items.reduce((itemSum, item) => itemSum + (item.cost_total_cents ?? 0), 0), 0);
   return { sales, byDay, byPayment, byProduct, totalCents, costCents, grossProfitCents: totalCents - costCents, marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0, orders: sales.length };
@@ -357,13 +452,28 @@ function getSalesAnalytics(filters = {}) {
 
 function createExpense(input) {
   const database = getDatabase();
+  if (!input || typeof input.description !== 'string' || !input.description.trim() || input.description.trim().length > 200) throw new Error('La descripción del gasto no es válida.');
+  validateMoney(input.amountCents, 'El monto del gasto');
+  if (input.amountCents <= 0) throw new Error('El monto del gasto debe ser mayor a cero.');
   const result = database.transaction(() => {
-    const expense = database.prepare(`INSERT INTO expenses (description, amount_cents, category, notes) VALUES (?, ?, ?, ?)`).run(input.description, input.amountCents, input.category || 'other', input.notes || '');
+    const expense = database.prepare(`INSERT INTO expenses (description, amount_cents, category, notes) VALUES (?, ?, ?, ?)`).run(input.description.trim(), input.amountCents, input.category || 'other', input.notes || '');
     const register = getOpenCashRegister(database);
-    database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('expense', ?, ?, ?, ?)`).run(-input.amountCents, expense.lastInsertRowid, register.id, input.description);
+    database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('expense', ?, ?, ?, ?)`).run(-input.amountCents, expense.lastInsertRowid, register.id, input.description.trim());
     return expense.lastInsertRowid;
   })();
   return database.prepare('SELECT * FROM expenses WHERE id = ?').get(result);
+}
+
+function createWithdrawal(input) {
+  const database = getDatabase();
+  if (!input || typeof input.reason !== 'string' || !input.reason.trim() || input.reason.trim().length > 200) throw new Error('El motivo del retiro no es válido.');
+  validateMoney(input.amountCents, 'El monto del retiro');
+  if (input.amountCents <= 0) throw new Error('El monto del retiro debe ser mayor a cero.');
+  const result = database.transaction(() => {
+    const register = getOpenCashRegister(database);
+    return database.prepare("INSERT INTO cash_movements (type, amount_cents, register_id, description) VALUES ('withdrawal', ?, ?, ?)").run(-input.amountCents, register.id, input.reason.trim());
+  })();
+  return database.prepare('SELECT * FROM cash_movements WHERE id = ?').get(result.lastInsertRowid);
 }
 
 function listExpenses(limit = 100) { return getDatabase().prepare('SELECT * FROM expenses ORDER BY datetime(created_at) DESC LIMIT ?').all(limit); }
@@ -422,28 +532,30 @@ function updateSettings(input) {
 function getDailyReport(businessDate) {
   if (typeof businessDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) throw new Error('La fecha del reporte no es válida.');
   const database = getDatabase();
-  const sales = database.prepare("SELECT * FROM sales WHERE date(created_at, 'localtime') = date(?) ORDER BY datetime(created_at), id").all(businessDate);
+  const sales = database.prepare("SELECT * FROM sales WHERE status = 'active' AND date(created_at, 'localtime') = date(?) ORDER BY datetime(created_at), id").all(businessDate);
   const saleIds = sales.map((sale) => sale.id);
   const items = saleIds.length ? database.prepare(`SELECT sale_id, COALESCE(SUM(cost_total_cents), 0) AS cost_cents FROM sale_items WHERE sale_id IN (${saleIds.map(() => '?').join(',')}) GROUP BY sale_id`).all(...saleIds) : [];
   const costs = new Map(items.map((item) => [item.sale_id, item.cost_cents]));
   const totalCents = sales.reduce((sum, sale) => sum + sale.total_cents, 0);
   const costCents = sales.reduce((sum, sale) => sum + (costs.get(sale.id) || 0), 0);
-  const paymentRows = database.prepare("SELECT payment_method, COALESCE(SUM(total_cents), 0) AS total_cents, COUNT(*) AS orders FROM sales WHERE date(created_at, 'localtime') = date(?) GROUP BY payment_method").all(businessDate);
+  const paymentRows = database.prepare("SELECT payment_method, COALESCE(SUM(total_cents), 0) AS total_cents, COUNT(*) AS orders FROM sales WHERE status = 'active' AND date(created_at, 'localtime') = date(?) GROUP BY payment_method").all(businessDate);
   const paymentSplit = { cashCents: 0, cardCents: 0 };
   for (const row of paymentRows) paymentSplit[row.payment_method === 'cash' ? 'cashCents' : 'cardCents'] = row.total_cents;
   const expenses = database.prepare("SELECT category, COALESCE(SUM(amount_cents), 0) AS total_cents, COUNT(*) AS count FROM expenses WHERE date(created_at, 'localtime') = date(?) GROUP BY category ORDER BY total_cents DESC").all(businessDate);
   const expensesTotalCents = expenses.reduce((sum, expense) => sum + expense.total_cents, 0);
   const register = database.prepare('SELECT * FROM cash_registers WHERE business_date = ?').get(businessDate) || null;
-  const movements = register ? database.prepare('SELECT amount_cents FROM cash_movements WHERE register_id = ?').all(register.id) : [];
+  const movements = register ? database.prepare('SELECT * FROM cash_movements WHERE register_id = ?').all(register.id) : [];
   const expectedCents = register ? (register.expected_cents ?? movements.reduce((sum, movement) => sum + movement.amount_cents, 0)) : null;
-  return { businessDate, sales, orders: sales.length, totalCents, paymentSplit, expenses, expensesTotalCents, costCents, grossProfitCents: totalCents - costCents, marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0, cash: { openingCents: register?.opening_cents ?? null, expectedCents, countedCents: register?.counted_cents ?? null, differenceCents: register?.difference_cents ?? null, status: register?.status ?? 'not_open' } };
+  const withdrawals = movements.filter((movement) => movement.type === 'withdrawal');
+  const withdrawalsTotalCents = withdrawals.reduce((sum, movement) => sum + Math.abs(movement.amount_cents), 0);
+  return { businessDate, sales, orders: sales.length, totalCents, paymentSplit, expenses, expensesTotalCents, withdrawals, withdrawalsTotalCents, costCents, grossProfitCents: totalCents - costCents, marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0, cash: { openingCents: register?.opening_cents ?? null, expectedCents, countedCents: register?.counted_cents ?? null, differenceCents: register?.difference_cents ?? null, status: register?.status ?? 'not_open' } };
 }
 
 function getDashboardSummary() {
   const database = getDatabase();
   return {
-    salesTodayCents: database.prepare(`SELECT COALESCE(SUM(total_cents), 0) AS value FROM sales WHERE date(created_at) = date('now', 'localtime')`).get().value,
-    ordersToday: database.prepare(`SELECT COUNT(*) AS value FROM sales WHERE date(created_at) = date('now', 'localtime')`).get().value,
+    salesTodayCents: database.prepare(`SELECT COALESCE(SUM(total_cents), 0) AS value FROM sales WHERE status = 'active' AND date(created_at) = date('now', 'localtime')`).get().value,
+    ordersToday: database.prepare(`SELECT COUNT(*) AS value FROM sales WHERE status = 'active' AND date(created_at) = date('now', 'localtime')`).get().value,
     expensesTodayCents: database.prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS value FROM expenses WHERE date(created_at) = date('now', 'localtime')`).get().value,
     lowStock: database.prepare('SELECT * FROM products WHERE active = 1 AND stock <= ? ORDER BY stock, name').all(getSettings().lowStockThreshold),
   };
@@ -470,4 +582,4 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

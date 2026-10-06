@@ -29,9 +29,10 @@ A single small chicken shop, one location, primarily counter sales, with one own
 2. Add single-admin configurable authentication — complete
 3. Strengthen cash register lifecycle and closure records — complete
 4. Add product costs and historical margin snapshots — complete
-5. Add daily operational report and export — pending
-6. Add safe backup and restore — complete
-7. Verify commercial flows and package build — pending
+5. Add cash withdrawal movements and daily report visibility — complete
+6. Add daily operational report and export — pending
+7. Add safe backup and restore — complete
+8. Verify commercial flows and package build — pending
 
 ## Evidence
 - Existing app already has products, sales, expenses, cash movements, exports, and SQLite persistence.

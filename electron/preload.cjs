@@ -5,9 +5,12 @@ contextBridge.exposeInMainWorld('salesApi', {
     list: () => ipcRenderer.invoke('products:list'),
     create: (input) => ipcRenderer.invoke('products:create', input),
     update: (input) => ipcRenderer.invoke('products:update', input),
+    adjustStock: (input) => ipcRenderer.invoke('products:adjust-stock', input),
+    movements: (productId, limit, filters) => ipcRenderer.invoke('products:movements', productId, limit, filters),
   },
   sales: {
     create: (input) => ipcRenderer.invoke('sales:create', input),
+    void: (id, reason) => ipcRenderer.invoke('sales:void', id, reason),
     list: (limit, filters) => ipcRenderer.invoke('sales:list', limit, filters),
     analytics: (filters) => ipcRenderer.invoke('sales:analytics', filters),
     get: (id) => ipcRenderer.invoke('sales:get', id),
@@ -23,5 +26,5 @@ contextBridge.exposeInMainWorld('salesApi', {
   window: { minimize: () => ipcRenderer.send('window:minimize'), maximize: () => ipcRenderer.send('window:maximize'), close: () => ipcRenderer.send('window:close'), isMaximized: () => ipcRenderer.invoke('window:is-maximized') },
   settings: { get: () => ipcRenderer.invoke('settings:get'), update: (input) => ipcRenderer.invoke('settings:update', input), changePassword: (input) => ipcRenderer.invoke('auth:change-password', input) },
   auth: { login: (input) => ipcRenderer.invoke('auth:login', input) },
-  cash: { open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents), get: () => ipcRenderer.invoke('cash:get'), close: (countedCents) => ipcRenderer.invoke('cash:close', countedCents) },
+  cash: { open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents), get: () => ipcRenderer.invoke('cash:get'), close: (countedCents) => ipcRenderer.invoke('cash:close', countedCents), withdraw: (input) => ipcRenderer.invoke('cash:withdraw', input) },
 });
