@@ -2252,3 +2252,22 @@ body {
 .dark-theme .empty-state strong {
   color:var(--ink)
 }
+
+
+/* Accessibility: readable operational data */
+.table-row { font-size:14px; }
+.table-head { font-size:12px; }
+.pill { font-size:13px; }
+.sale-id, .total { font-size:14px; }
+.stat-copy span, .stat-copy small, .stock-info span, .expense-row small, .notification-item small, .notification-heading span { font-size:13px; }
+.stat-copy strong { font-size:28px; }
+.panel-heading p, .subtitle, .analytics-toolbar span, .filter-intro span { font-size:14px; }
+.analytics-toolbar label, .history-filterbar label, .cash-input, .cash-action label, .settings-card label, .expense-form form label { font-size:13px; }
+.analytics-toolbar input, .history-filterbar input, .history-filterbar select, .cash-input input, .cash-action input, .expense-form input, .expense-form select, .settings-card input { font-size:14px; }
+.product-card p, .product-meta, .picker-card small, .cart-row small, .login-card label { font-size:13px; }
+.product-card-body > strong, .checkout-total strong, .cash-balance strong { font-size:26px; }
+.history-summary span, .history-summary small, .sale-detail-meta, .sale-item-detail small, .sale-totals span, .profile-popover span, .profile-popover small { font-size:13px; }
+.history-summary strong { font-size:23px; }
+.notification-item strong, .notification-item em, .notification-footnote, .clear-all-button { font-size:12px !important; }
+.notification-button i { font-size:11px; }
+@media (max-width: 760px) { .table-row { font-size:13px; } .table-head { font-size:11px; } }
