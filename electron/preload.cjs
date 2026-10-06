@@ -23,5 +23,5 @@ contextBridge.exposeInMainWorld('salesApi', {
   window: { minimize: () => ipcRenderer.send('window:minimize'), maximize: () => ipcRenderer.send('window:maximize'), close: () => ipcRenderer.send('window:close'), isMaximized: () => ipcRenderer.invoke('window:is-maximized') },
   settings: { get: () => ipcRenderer.invoke('settings:get'), update: (input) => ipcRenderer.invoke('settings:update', input), changePassword: (input) => ipcRenderer.invoke('auth:change-password', input) },
   auth: { login: (input) => ipcRenderer.invoke('auth:login', input) },
-  cash: { open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents), get: () => ipcRenderer.invoke('cash:get'), close: (countedCents) => ipcRenderer.invoke('cash:close', countedCents) },
+  cash: { open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents), get: () => ipcRenderer.invoke('cash:get'), close: (countedCents) => ipcRenderer.invoke('cash:close', countedCents), withdraw: (input) => ipcRenderer.invoke('cash:withdraw', input) },
 });

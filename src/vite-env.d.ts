@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-type DailyReport = { businessDate: string; orders: number; totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; paymentSplit: { cashCents: number; cardCents: number }; expenses: Array<{ category: string; total_cents: number; count: number }>; expensesTotalCents: number; cash: { openingCents: number | null; expectedCents: number | null; countedCents: number | null; differenceCents: number | null; status: string }; sales: unknown[] };
+type DailyReport = { businessDate: string; orders: number; totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; paymentSplit: { cashCents: number; cardCents: number }; expenses: Array<{ category: string; total_cents: number; count: number }>; expensesTotalCents: number; withdrawalsTotalCents: number; withdrawals: unknown[]; cash: { openingCents: number | null; expectedCents: number | null; countedCents: number | null; differenceCents: number | null; status: string }; sales: unknown[] };
 
 type Product = {
   id: number; name: string; description: string; price_cents: number; cost_cents: number; stock: number; image_path: string | null;
@@ -19,7 +19,7 @@ declare global {
       window: { minimize(): void; maximize(): void; close(): void; isMaximized(): Promise<boolean> };
       settings: { get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; update(input: { businessName: string; currency: string; lowStockThreshold: number }): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>; changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ changed: boolean }> };
       auth: { login(input: { email: string; password: string }): Promise<boolean> };
-      cash: { open(amountCents: number): Promise<unknown>; get(): Promise<{ opening: unknown; register?: any; movements: any[]; balanceCents: number; expectedCents?: number; countedCents?: number; differenceCents?: number; isOpen: boolean; isClosed?: boolean }>; close(countedCents: number): Promise<{ expectedCents: number; countedCents: number; differenceCents: number }> };
+      cash: { open(amountCents: number): Promise<unknown>; get(): Promise<{ opening: unknown; register?: any; movements: any[]; balanceCents: number; expectedCents?: number; countedCents?: number; differenceCents?: number; isOpen: boolean; isClosed?: boolean }>; close(countedCents: number): Promise<{ expectedCents: number; countedCents: number; differenceCents: number }>; withdraw(input: { amountCents: number; reason: string }): Promise<unknown> };
     };
   }
 }

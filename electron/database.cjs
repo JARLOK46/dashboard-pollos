@@ -357,13 +357,28 @@ function getSalesAnalytics(filters = {}) {
 
 function createExpense(input) {
   const database = getDatabase();
+  if (!input || typeof input.description !== 'string' || !input.description.trim() || input.description.trim().length > 200) throw new Error('La descripción del gasto no es válida.');
+  validateMoney(input.amountCents, 'El monto del gasto');
+  if (input.amountCents <= 0) throw new Error('El monto del gasto debe ser mayor a cero.');
   const result = database.transaction(() => {
-    const expense = database.prepare(`INSERT INTO expenses (description, amount_cents, category, notes) VALUES (?, ?, ?, ?)`).run(input.description, input.amountCents, input.category || 'other', input.notes || '');
+    const expense = database.prepare(`INSERT INTO expenses (description, amount_cents, category, notes) VALUES (?, ?, ?, ?)`).run(input.description.trim(), input.amountCents, input.category || 'other', input.notes || '');
     const register = getOpenCashRegister(database);
-    database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('expense', ?, ?, ?, ?)`).run(-input.amountCents, expense.lastInsertRowid, register.id, input.description);
+    database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('expense', ?, ?, ?, ?)`).run(-input.amountCents, expense.lastInsertRowid, register.id, input.description.trim());
     return expense.lastInsertRowid;
   })();
   return database.prepare('SELECT * FROM expenses WHERE id = ?').get(result);
+}
+
+function createWithdrawal(input) {
+  const database = getDatabase();
+  if (!input || typeof input.reason !== 'string' || !input.reason.trim() || input.reason.trim().length > 200) throw new Error('El motivo del retiro no es válido.');
+  validateMoney(input.amountCents, 'El monto del retiro');
+  if (input.amountCents <= 0) throw new Error('El monto del retiro debe ser mayor a cero.');
+  const result = database.transaction(() => {
+    const register = getOpenCashRegister(database);
+    return database.prepare("INSERT INTO cash_movements (type, amount_cents, register_id, description) VALUES ('withdrawal', ?, ?, ?)").run(-input.amountCents, register.id, input.reason.trim());
+  })();
+  return database.prepare('SELECT * FROM cash_movements WHERE id = ?').get(result.lastInsertRowid);
 }
 
 function listExpenses(limit = 100) { return getDatabase().prepare('SELECT * FROM expenses ORDER BY datetime(created_at) DESC LIMIT ?').all(limit); }
@@ -434,9 +449,11 @@ function getDailyReport(businessDate) {
   const expenses = database.prepare("SELECT category, COALESCE(SUM(amount_cents), 0) AS total_cents, COUNT(*) AS count FROM expenses WHERE date(created_at, 'localtime') = date(?) GROUP BY category ORDER BY total_cents DESC").all(businessDate);
   const expensesTotalCents = expenses.reduce((sum, expense) => sum + expense.total_cents, 0);
   const register = database.prepare('SELECT * FROM cash_registers WHERE business_date = ?').get(businessDate) || null;
-  const movements = register ? database.prepare('SELECT amount_cents FROM cash_movements WHERE register_id = ?').all(register.id) : [];
+  const movements = register ? database.prepare('SELECT * FROM cash_movements WHERE register_id = ?').all(register.id) : [];
   const expectedCents = register ? (register.expected_cents ?? movements.reduce((sum, movement) => sum + movement.amount_cents, 0)) : null;
-  return { businessDate, sales, orders: sales.length, totalCents, paymentSplit, expenses, expensesTotalCents, costCents, grossProfitCents: totalCents - costCents, marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0, cash: { openingCents: register?.opening_cents ?? null, expectedCents, countedCents: register?.counted_cents ?? null, differenceCents: register?.difference_cents ?? null, status: register?.status ?? 'not_open' } };
+  const withdrawals = movements.filter((movement) => movement.type === 'withdrawal');
+  const withdrawalsTotalCents = withdrawals.reduce((sum, movement) => sum + Math.abs(movement.amount_cents), 0);
+  return { businessDate, sales, orders: sales.length, totalCents, paymentSplit, expenses, expensesTotalCents, withdrawals, withdrawalsTotalCents, costCents, grossProfitCents: totalCents - costCents, marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0, cash: { openingCents: register?.opening_cents ?? null, expectedCents, countedCents: register?.counted_cents ?? null, differenceCents: register?.difference_cents ?? null, status: register?.status ?? 'not_open' } };
 }
 
 function getDashboardSummary() {
@@ -470,4 +487,4 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
