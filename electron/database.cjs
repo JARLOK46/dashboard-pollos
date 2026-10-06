@@ -8,7 +8,7 @@ const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
 const SCHEMA_VERSION = 3;
-const OLLAMA_MODELS = ['gpt-oss:20b-cloud', 'gpt-oss:120b-cloud', 'gemma4:cloud', 'gemma4:31b-cloud', 'nemotron-3-super:cloud', 'nemotron-3-nano:30b-cloud'];
+const OLLAMA_MODELS = ['gpt-oss:20b', 'gpt-oss:120b', 'gemma4:31b', 'nemotron-3-nano:30b', 'nemotron-3-super', 'nemotron-3-ultra'];
 const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'sale_voids', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users', 'inventory_movements'];
 
 let db;

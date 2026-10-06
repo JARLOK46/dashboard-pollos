@@ -9,7 +9,7 @@ type ProductInput = { id?: number; name: string; description: string; priceCents
 type Sale = { id: number; total_cents: number; payment_method: 'cash' | 'card'; amount_received_cents: number; change_cents: number; customer_name?: string; notes?: string; status?: 'active' | 'voided'; voided_at?: string | null; void_reason?: string | null; void_record_reason?: string | null; void_recorded_at?: string | null; created_at: string; items: SaleItem[] };
 type Page = 'dashboard' | 'products' | 'checkout' | 'history' | 'expenses' | 'cash' | 'reports' | 'settings';
 type SettingsData = { businessName: string; currency: string; lowStockThreshold: number };
-const OLLAMA_MODELS = [{ id: 'gpt-oss:20b-cloud', label: 'GPT OSS 20B' }, { id: 'gpt-oss:120b-cloud', label: 'GPT OSS 120B' }, { id: 'gemma4:cloud', label: 'Gemma 4' }, { id: 'gemma4:31b-cloud', label: 'Gemma 4 31B' }, { id: 'nemotron-3-super:cloud', label: 'Nemotron 3 Super' }, { id: 'nemotron-3-nano:30b-cloud', label: 'Nemotron 3 Nano 30B' }];
+const OLLAMA_MODELS = [{ id: 'gpt-oss:20b', label: 'GPT OSS 20B' }, { id: 'gpt-oss:120b', label: 'GPT OSS 120B' }, { id: 'gemma4:31b', label: 'Gemma 4 31B' }, { id: 'nemotron-3-nano:30b', label: 'Nemotron 3 Nano 30B' }, { id: 'nemotron-3-super', label: 'Nemotron 3 Super' }, { id: 'nemotron-3-ultra', label: 'Nemotron 3 Ultra' }];
 type DashboardAlert = { id: string; severity: 'critical' | 'warning' | 'info'; title: string; message: string; page: Page };
 const money = (cents: number) => `$ ${new Intl.NumberFormat('es-AR').format(Math.round(cents / 100))}`;
 const today = () => new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
