@@ -44,14 +44,26 @@ function buildAiSnapshot() {
     alertas: database.getDashboardAlerts(),
   }), currency);
 }
+const AI_TOOL_NAMES = new Set(['create_expense']);
+const EXPENSE_CATEGORIES = new Set(['insumos', 'servicios', 'personal', 'other']);
+function validateAiToolCall(toolCall) {
+  if (!toolCall || typeof toolCall !== 'object' || !AI_TOOL_NAMES.has(toolCall.name)) return null;
+  const args = toolCall.arguments;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+  const description = typeof args.description === 'string' ? args.description.trim() : '';
+  const category = typeof args.category === 'string' ? args.category.trim().toLowerCase() : '';
+  const amountCents = args.amountCents;
+  if (!description || description.length > 200 || !Number.isSafeInteger(amountCents) || amountCents <= 0 || amountCents > 2147483647 || !EXPENSE_CATEGORIES.has(category)) return null;
+  return { name: 'create_expense', arguments: { description, amountCents, category } };
+}
 function parseAiResponse(text, currency) {
-  const fallback = { text: text.trim(), period: null, source: 'Datos operativos locales', metrics: [] };
+  const fallback = { text: text.trim(), period: null, source: 'Datos operativos locales', metrics: [], toolCall: null, currency };
   let candidate = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   try {
     const parsed = JSON.parse(candidate);
     if (!parsed || typeof parsed !== 'object') return fallback;
     const metrics = Array.isArray(parsed.metrics) ? parsed.metrics.filter(item => item && typeof item === 'object').map(item => ({ label: String(item.label || item.name || 'Métrica'), value: String(item.value ?? ''), detail: item.detail ? String(item.detail) : undefined })) : [];
-    return { text: typeof parsed.summary === 'string' ? parsed.summary : (typeof parsed.text === 'string' ? parsed.text : fallback.text), period: parsed.period ? String(parsed.period) : null, source: parsed.source ? String(parsed.source) : fallback.source, metrics, currency };
+    return { text: typeof parsed.summary === 'string' ? parsed.summary : (typeof parsed.text === 'string' ? parsed.text : fallback.text), period: parsed.period ? String(parsed.period) : null, source: parsed.source ? String(parsed.source) : fallback.source, metrics, toolCall: validateAiToolCall(parsed.toolCall), currency };
   } catch { return fallback; }
 }
 async function analyzeWithOllama(question, history = [], mode = 'question') {
@@ -61,7 +73,7 @@ async function analyzeWithOllama(question, history = [], mode = 'question') {
   if (!settings.model) throw new Error('El modelo seleccionado no es válido.');
   const key = credentials.getApiKey();
   const snapshot = buildAiSnapshot();
-  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}]}. Si no podés cumplirlo, respondé texto plano. Los importes deben ser completos y conservar ${snapshot.moneda}.`;
+  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}],"toolCall":null}. Solo si el dueño pidió registrar un gasto, podés proponer toolCall con exactamente {"name":"create_expense","arguments":{"description":"texto","amountCents":12345,"category":"insumos|servicios|personal|other"}}. amountCents es entero positivo en centavos. Nunca ejecutes herramientas ni afirmes que registraste nada: toolCall es únicamente una propuesta pendiente de confirmación humana. Para cualquier otra consulta, toolCall debe ser null. Si no podés cumplirlo, respondé texto plano. Los importes deben ser completos y conservar ${snapshot.moneda}.`;
   const boundedHistory = Array.isArray(history) ? history.slice(-AI_LIMITS.contextMessages).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', content: String(item.content || '').slice(0, 1500) })).slice(-AI_LIMITS.contextMessages) : [];
   const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es ${snapshot.moneda}. Todos los importes financieros ya están expresados en unidades monetarias completas, no en centavos. No vuelvas a dividirlos ni los multipliques. Conservá la moneda ${snapshot.moneda} en todas las respuestas.\n\n${outputContract}\n\nModo: ${mode === 'daily-summary' ? 'generá un resumen diario accionable del negocio' : 'respondé la pregunta'}\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
   const contextText = JSON.stringify(boundedHistory);
