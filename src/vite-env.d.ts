@@ -9,8 +9,13 @@ type Product = {
 declare global {
   interface Window {
     salesApi: {
+<<<<<<< HEAD
       products: { list(): Promise<Product[]>; create(input: { name: string; description: string; priceCents: number; costCents: number; stock: number; imagePath: string | null }): Promise<Product>; update(input: { id: number; name: string; description: string; priceCents: number; costCents: number; stock: number; imagePath: string | null }): Promise<Product>; adjustStock(input: { productId: number; quantityDelta: number; reason: string }): Promise<Product>; movements(productId?: number, limit?: number, filters?: unknown): Promise<unknown[]> };
       sales: { create(input: { totalCents: number; paymentMethod: 'cash' | 'card'; amountReceivedCents: number; changeCents: number; items: Array<{ productId: number; productName: string; quantity: number; unitPriceCents: number; subtotalCents: number }> }): Promise<unknown>; list(limit?: number, filters?: unknown): Promise<unknown[]>; analytics(filters: unknown): Promise<{ totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; orders: number; byDay: Array<{ day: string; total_cents: number; cost_cents: number; orders: number }> }>; get(id: number): Promise<unknown> };
+=======
+      products: { list(): Promise<Product[]>; create(input: { name: string; description: string; priceCents: number; costCents: number; stock: number; imagePath: string | null }): Promise<Product>; update(input: { id: number; name: string; description: string; priceCents: number; costCents: number; stock: number; imagePath: string | null }): Promise<Product> };
+      sales: { create(input: { totalCents: number; paymentMethod: 'cash' | 'card'; amountReceivedCents: number; changeCents: number; items: Array<{ productId: number; productName: string; quantity: number; unitPriceCents: number; subtotalCents: number }> }): Promise<unknown>; void(id: number, reason: string): Promise<unknown>; list(limit?: number, filters?: unknown): Promise<unknown[]>; analytics(filters: unknown): Promise<{ totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; orders: number; byDay: Array<{ day: string; total_cents: number; cost_cents: number; orders: number }> }>; get(id: number): Promise<unknown> };
+>>>>>>> feat/sale-voids
       expenses: { create(input: unknown): Promise<unknown>; list(limit?: number): Promise<unknown[]> };
       dashboard: { summary(): Promise<unknown>; alerts(): Promise<Array<{ id: string; severity: 'critical' | 'warning' | 'info'; title: string; message: string; page: string }>> };
       report: { daily(businessDate: string): Promise<DailyReport>; export(businessDate: string, format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }> };
