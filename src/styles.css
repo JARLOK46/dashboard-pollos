@@ -2271,3 +2271,20 @@ body {
 .notification-item strong, .notification-item em, .notification-footnote, .clear-all-button { font-size:12px !important; }
 .notification-button i { font-size:11px; }
 @media (max-width: 760px) { .table-row { font-size:13px; } .table-head { font-size:11px; } }
+
+/* Checkout amount readability */
+.cash-input input {
+  font-size:18px;
+  font-weight:700;
+}
+.change-ok,
+.change-error {
+  font-size:18px;
+  font-weight:800;
+  line-height:1.35;
+  margin-top:10px;
+}
+.sale-totals strong,
+.sale-totals b {
+  font-size:20px;
+}
