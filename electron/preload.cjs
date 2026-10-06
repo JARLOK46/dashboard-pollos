@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('salesApi', {
   },
   sales: {
     create: (input) => ipcRenderer.invoke('sales:create', input),
+    void: (id, reason) => ipcRenderer.invoke('sales:void', id, reason),
     list: (limit, filters) => ipcRenderer.invoke('sales:list', limit, filters),
     analytics: (filters) => ipcRenderer.invoke('sales:analytics', filters),
     get: (id) => ipcRenderer.invoke('sales:get', id),

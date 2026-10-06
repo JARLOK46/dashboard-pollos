@@ -33,6 +33,7 @@ function registerIpc() {
   ipcMain.handle('products:create', (_event, input) => database.createProduct(input));
   ipcMain.handle('products:update', (_event, input) => database.updateProduct(input));
   ipcMain.handle('sales:create', (_event, input) => database.createSale(input));
+  ipcMain.handle('sales:void', (_event, id, reason) => database.voidSale(id, reason));
   ipcMain.handle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
   ipcMain.handle('sales:analytics', (_event, filters) => database.getSalesAnalytics(filters));
   ipcMain.handle('sales:get', (_event, id) => database.getSale(id));
