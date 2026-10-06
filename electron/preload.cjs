@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('salesApi', {
   database: { backup: () => ipcRenderer.invoke('database:backup'), restore: () => ipcRenderer.invoke('database:restore') },
   window: { minimize: () => ipcRenderer.send('window:minimize'), maximize: () => ipcRenderer.send('window:maximize'), close: () => ipcRenderer.send('window:close'), isMaximized: () => ipcRenderer.invoke('window:is-maximized') },
   settings: { get: () => ipcRenderer.invoke('settings:get'), update: (input) => ipcRenderer.invoke('settings:update', input), changePassword: (input) => ipcRenderer.invoke('auth:change-password', input) },
-  ai: { getConfig: () => ipcRenderer.invoke('ai:get-config'), setKey: (key) => ipcRenderer.invoke('ai:set-key', key), clearKey: () => ipcRenderer.invoke('ai:clear-key'), saveModel: (model) => ipcRenderer.invoke('ai:save-model', model), analyze: (question) => ipcRenderer.invoke('ai:analyze', question) },
+  ai: { getConfig: () => ipcRenderer.invoke('ai:get-config'), setKey: (key) => ipcRenderer.invoke('ai:set-key', key), clearKey: () => ipcRenderer.invoke('ai:clear-key'), saveModel: (model) => ipcRenderer.invoke('ai:save-model', model), analyze: (question, history, mode) => ipcRenderer.invoke('ai:analyze', question, history, mode) },
   auth: { login: (input) => ipcRenderer.invoke('auth:login', input) },
   cash: { open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents), get: () => ipcRenderer.invoke('cash:get'), close: (countedCents) => ipcRenderer.invoke('cash:close', countedCents), withdraw: (input) => ipcRenderer.invoke('cash:withdraw', input) },
 });

@@ -6,7 +6,7 @@ const credentials = require('./credentials.cjs');
 const XLSX = require('xlsx');
 const { buildWorkbook } = require('../scripts/export-report.cjs');
 
-const AI_LIMITS = { question: 2000, prompt: 12000, sales: 30, products: 100, expenses: 30 };
+const AI_LIMITS = { question: 2000, prompt: 16000, sales: 30, products: 100, expenses: 30, contextMessages: 8, contextChars: 6000 };
 const OLLAMA_URL = 'https://ollama.com/api/chat';
 function sanitizeSnapshot(value) {
   if (Array.isArray(value)) return value.map(sanitizeSnapshot);
@@ -41,27 +41,42 @@ function buildAiSnapshot() {
     productos: database.listProducts().slice(0, AI_LIMITS.products).map(({ id, name, price_cents, cost_cents, stock }) => ({ id, name, price_cents, cost_cents, stock, margin_percent: price_cents ? ((price_cents - cost_cents) / price_cents) * 100 : 0 })),
     gastosRecientes: database.listExpenses(AI_LIMITS.expenses).slice(0, AI_LIMITS.expenses),
     reporteCajaHoy: database.getDailyReport(today),
+    alertas: database.getDashboardAlerts(),
   }), currency);
 }
-async function analyzeWithOllama(question) {
+function parseAiResponse(text, currency) {
+  const fallback = { text: text.trim(), period: null, source: 'Datos operativos locales', metrics: [] };
+  let candidate = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(candidate);
+    if (!parsed || typeof parsed !== 'object') return fallback;
+    const metrics = Array.isArray(parsed.metrics) ? parsed.metrics.filter(item => item && typeof item === 'object').map(item => ({ label: String(item.label || item.name || 'Métrica'), value: String(item.value ?? ''), detail: item.detail ? String(item.detail) : undefined })) : [];
+    return { text: typeof parsed.summary === 'string' ? parsed.summary : (typeof parsed.text === 'string' ? parsed.text : fallback.text), period: parsed.period ? String(parsed.period) : null, source: parsed.source ? String(parsed.source) : fallback.source, metrics, currency };
+  } catch { return fallback; }
+}
+async function analyzeWithOllama(question, history = [], mode = 'question') {
   if (typeof question !== 'string' || !question.trim()) throw new Error('La pregunta es obligatoria.');
   if (question.trim().length > AI_LIMITS.question) throw new Error('La pregunta es demasiado larga.');
   const settings = database.getOllamaSettings();
   if (!settings.model) throw new Error('El modelo seleccionado no es válido.');
   const key = credentials.getApiKey();
   const snapshot = buildAiSnapshot();
-  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es ${snapshot.moneda}. Todos los importes financieros ya están expresados en unidades monetarias completas, no en centavos. No vuelvas a dividirlos ni los multipliques. Por ejemplo, amount 76000 en COP debe mostrarse como $ 76.000 COP, nunca $ 7.600.000. Conservá la moneda ${snapshot.moneda} en todas las respuestas.\n\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
-  if (prompt.length > AI_LIMITS.prompt) throw new Error('El resumen de datos excede el límite permitido.');
+  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}]}. Si no podés cumplirlo, respondé texto plano. Los importes deben ser completos y conservar ${snapshot.moneda}.`;
+  const boundedHistory = Array.isArray(history) ? history.slice(-AI_LIMITS.contextMessages).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', content: String(item.content || '').slice(0, 1500) })).slice(-AI_LIMITS.contextMessages) : [];
+  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es ${snapshot.moneda}. Todos los importes financieros ya están expresados en unidades monetarias completas, no en centavos. No vuelvas a dividirlos ni los multipliques. Conservá la moneda ${snapshot.moneda} en todas las respuestas.\n\n${outputContract}\n\nModo: ${mode === 'daily-summary' ? 'generá un resumen diario accionable del negocio' : 'respondé la pregunta'}\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
+  const contextText = JSON.stringify(boundedHistory);
+  const fullPrompt = `${prompt}\nContexto reciente (solo lectura): ${contextText}`;
+  if (fullPrompt.length > AI_LIMITS.prompt) throw new Error('El resumen de datos excede el límite permitido.');
   const controller = new AbortController();
   // Cloud models, especially larger variants, may need more than 30 seconds to start and generate a response.
   const timer = setTimeout(() => controller.abort(), 120000);
   try {
-    const response = await fetch(OLLAMA_URL, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.model, messages: [{ role: 'user', content: prompt }], stream: false }) });
+    const response = await fetch(OLLAMA_URL, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.model, messages: [...boundedHistory, { role: 'user', content: fullPrompt }], stream: false }) });
     if (!response.ok) throw new Error(`Ollama Cloud rechazó la solicitud (HTTP ${response.status}).`);
     const payload = await response.json();
     const text = payload?.message?.content;
     if (typeof text !== 'string' || !text.trim()) throw new Error('Ollama Cloud devolvió una respuesta inválida.');
-    return { text: text.trim(), timestamp: new Date().toISOString(), model: settings.model };
+    return { ...parseAiResponse(text, snapshot.moneda), rawText: text.trim(), timestamp: new Date().toISOString(), model: settings.model };
   } catch (error) {
     if (error?.name === 'AbortError') throw new Error('Ollama Cloud tardó más de 2 minutos en responder. Probá con un modelo más liviano como gpt-oss:20b o revisá tu conexión.');
     if (error?.message?.startsWith('Ollama Cloud') || error?.message?.startsWith('La consulta') || error?.message?.startsWith('Ollama Cloud devolvió')) throw error;
@@ -150,7 +165,7 @@ function registerIpc() {
   ipcMain.handle('ai:set-key', (_event, key) => { const result = credentials.saveApiKey(key); database.updateOllamaConfigured(true); return { ...database.getOllamaSettings(), ...result }; });
   ipcMain.handle('ai:clear-key', () => { const result = credentials.clearApiKey(); database.updateOllamaConfigured(false); return { ...database.getOllamaSettings(), ...result }; });
   ipcMain.handle('ai:save-model', (_event, model) => database.saveOllamaModel(model));
-  ipcMain.handle('ai:analyze', (_event, question) => analyzeWithOllama(question));
+  ipcMain.handle('ai:analyze', (_event, question, history, mode) => analyzeWithOllama(question, history, mode));
   ipcMain.handle('auth:login', (_event, input) => database.authenticateAdmin(input?.email, input?.password));
   ipcMain.handle('auth:change-password', (_event, input) => database.changeAdminPassword(input?.currentPassword, input?.newPassword));
   ipcMain.handle('export:data', async (_event, format) => {
