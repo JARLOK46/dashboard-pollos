@@ -17,16 +17,31 @@ function sanitizeSnapshot(value) {
   }
   return result;
 }
+function presentMoney(value, currency) {
+  return { amount: Number(value || 0) / 100, currency };
+}
+function presentFinancialData(value, currency) {
+  if (Array.isArray(value)) return value.map(item => presentFinancialData(item, currency));
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (/cents$/i.test(key) && typeof item === 'number') result[key.replace(/Cents$/i, '')] = presentMoney(item, currency);
+    else result[key] = presentFinancialData(item, currency);
+  }
+  return result;
+}
 function buildAiSnapshot() {
   const today = new Date().toISOString().slice(0, 10);
   const analytics = database.getSalesAnalytics({ from: today, to: today });
-  return sanitizeSnapshot({
+  const currency = database.getSettings().currency;
+  return presentFinancialData(sanitizeSnapshot({
+    moneda: currency,
     ventasHoy: { resumen: { totalCents: analytics.totalCents, costCents: analytics.costCents, grossProfitCents: analytics.grossProfitCents, marginPercent: analytics.marginPercent, orders: analytics.orders }, porDia: analytics.byDay, porPago: analytics.byPayment, porProducto: analytics.byProduct },
     ventasRecientes: database.listSales(AI_LIMITS.sales).slice(0, AI_LIMITS.sales),
     productos: database.listProducts().slice(0, AI_LIMITS.products).map(({ id, name, price_cents, cost_cents, stock }) => ({ id, name, price_cents, cost_cents, stock, margin_percent: price_cents ? ((price_cents - cost_cents) / price_cents) * 100 : 0 })),
     gastosRecientes: database.listExpenses(AI_LIMITS.expenses).slice(0, AI_LIMITS.expenses),
     reporteCajaHoy: database.getDailyReport(today),
-  });
+  }), currency);
 }
 async function analyzeWithOllama(question) {
   if (typeof question !== 'string' || !question.trim()) throw new Error('La pregunta es obligatoria.');
@@ -35,7 +50,7 @@ async function analyzeWithOllama(question) {
   if (!settings.model) throw new Error('El modelo seleccionado no es válido.');
   const key = credentials.getApiKey();
   const snapshot = buildAiSnapshot();
-  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones. Pregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
+  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es ${snapshot.moneda}. Todos los importes financieros ya están expresados en unidades monetarias completas, no en centavos. No vuelvas a dividirlos ni los multipliques. Por ejemplo, amount 76000 en COP debe mostrarse como $ 76.000 COP, nunca $ 7.600.000. Conservá la moneda ${snapshot.moneda} en todas las respuestas.\n\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
   if (prompt.length > AI_LIMITS.prompt) throw new Error('El resumen de datos excede el límite permitido.');
   const controller = new AbortController();
   // Cloud models, especially larger variants, may need more than 30 seconds to start and generate a response.
