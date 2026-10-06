@@ -12,6 +12,17 @@ type SettingsData = { businessName: string; currency: string; lowStockThreshold:
 const OLLAMA_MODELS = [{ id: 'gpt-oss:20b', label: 'GPT OSS 20B' }, { id: 'gpt-oss:120b', label: 'GPT OSS 120B' }, { id: 'gemma4:31b', label: 'Gemma 4 31B' }, { id: 'nemotron-3-nano:30b', label: 'Nemotron 3 Nano 30B' }, { id: 'nemotron-3-super', label: 'Nemotron 3 Super' }, { id: 'nemotron-3-ultra', label: 'Nemotron 3 Ultra' }];
 type DashboardAlert = { id: string; severity: 'critical' | 'warning' | 'info'; title: string; message: string; page: Page };
 const money = (cents: number) => `$ ${new Intl.NumberFormat('es-AR').format(Math.round(cents / 100))}`;
+function formatAIOutput(text: string) {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/^\s*#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*]\s+/gm, '• ')
+    .replace(/^\s*\d+[.)]\s+/gm, match => `${match.trim().replace(/[.)]$/, '')}. `)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 const today = () => new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
 const dateInput = (date: Date) => date.toISOString().slice(0, 10);
 const defaultRange = () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 6); return { from: dateInput(from), to: dateInput(to) }; };
@@ -67,7 +78,7 @@ function AIChat() {
       <div className="ai-chat-header"><div><strong id="ai-chat-title">Asistente de Pollo &amp; Caja</strong><span>Consultas sobre tu operación</span></div><button type="button" className="ai-close" aria-label="Cerrar asistente" onClick={() => setOpen(false)}>×</button></div>
       <div className="ai-chat-body" aria-live="polite">
         {!messages.length && <div className="ai-empty"><div className="ai-empty-icon">✦</div><h3>¿En qué te ayudo?</h3><p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p><div className="ai-suggestions">{suggestions.map(item => <button type="button" key={item} onClick={() => send(item)}>{item}</button>)}</div></div>}
-        {messages.map((message, index) => <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.text}</span></div>)}
+        {messages.map((message, index) => <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}><span className="ai-message-content">{formatAIOutput(message.text)}</span></div>)}
         {busy && <div className="ai-message assistant ai-loading" aria-label="El asistente está pensando"><span>Analizando<span className="ai-dots">…</span></span></div>}
         {error && <p className="ai-error" role="alert">{configured === false ? 'La clave de Ollama Cloud no está configurada. Podés agregarla en Configuración → IA.' : error}</p>}
       </div>
