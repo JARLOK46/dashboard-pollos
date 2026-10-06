@@ -32,6 +32,8 @@ function registerIpc() {
   ipcMain.handle('products:list', () => database.listProducts());
   ipcMain.handle('products:create', (_event, input) => database.createProduct(input));
   ipcMain.handle('products:update', (_event, input) => database.updateProduct(input));
+  ipcMain.handle('products:adjust-stock', (_event, input) => database.adjustProductStock(input));
+  ipcMain.handle('products:movements', (_event, productId, limit, filters) => database.listInventoryMovements(productId, limit, filters));
   ipcMain.handle('sales:create', (_event, input) => database.createSale(input));
   ipcMain.handle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
   ipcMain.handle('sales:analytics', (_event, filters) => database.getSalesAnalytics(filters));

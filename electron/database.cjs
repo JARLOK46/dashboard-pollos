@@ -7,8 +7,8 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
-const SCHEMA_VERSION = 1;
-const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users'];
+const SCHEMA_VERSION = 2;
+const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users', 'inventory_movements'];
 
 let db;
 
@@ -94,6 +94,18 @@ function migrate(database) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity_delta INTEGER NOT NULL CHECK (quantity_delta <> 0),
+      stock_before INTEGER NOT NULL CHECK (stock_before >= 0),
+      stock_after INTEGER NOT NULL CHECK (stock_after >= 0),
+      type TEXT NOT NULL CHECK (type IN ('sale', 'return', 'adjustment', 'entry')),
+      reason TEXT NOT NULL,
+      reference_type TEXT,
+      reference_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL UNIQUE,
@@ -108,6 +120,7 @@ function migrate(database) {
       ('lowStockThreshold', '10');
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
+    CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created ON inventory_movements(product_id, datetime(created_at) DESC, id DESC);
   `);
   const productColumns = database.prepare('PRAGMA table_info(products)').all().map((column) => column.name);
   if (!productColumns.includes('cost_cents')) database.exec('ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (cost_cents >= 0)');
@@ -281,15 +294,53 @@ function validateProductInput(input, updating = false) {
 }
 function createProduct(input) {
   validateProductInput(input);
-  const result = getDatabase().prepare(`INSERT INTO products (name, description, price_cents, cost_cents, stock, image_path) VALUES (?, ?, ?, ?, ?, ?)`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null);
-  return getDatabase().prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid);
+  const database = getDatabase();
+  const result = database.transaction(() => {
+    const created = database.prepare(`INSERT INTO products (name, description, price_cents, cost_cents, stock, image_path) VALUES (?, ?, ?, ?, ?, ?)`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null);
+    if (input.stock > 0) database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) VALUES (?, ?, 0, ?, 'entry', 'Stock inicial', 'product', ?)`).run(created.lastInsertRowid, input.stock, input.stock, created.lastInsertRowid);
+    return created.lastInsertRowid;
+  })();
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(result);
 }
 
 function updateProduct(input) {
   validateProductInput(input, true);
-  const result = getDatabase().prepare(`UPDATE products SET name = ?, description = ?, price_cents = ?, cost_cents = ?, stock = ?, image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null, input.id);
+  const database = getDatabase();
+  const result = database.transaction(() => {
+    const current = database.prepare('SELECT stock FROM products WHERE id = ?').get(input.id);
+    if (!current) throw new Error('El producto no existe.');
+    const updated = database.prepare(`UPDATE products SET name = ?, description = ?, price_cents = ?, cost_cents = ?, stock = ?, image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(input.name.trim(), input.description || '', input.priceCents, input.costCents ?? 0, input.stock, input.imagePath || null, input.id);
+    const delta = input.stock - current.stock;
+    if (delta) database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) VALUES (?, ?, ?, ?, 'adjustment', 'Edición manual del producto', 'product', ?)`).run(input.id, delta, current.stock, input.stock, input.id);
+    return updated;
+  })();
   if (!result.changes) throw new Error('El producto no existe.');
-  return getDatabase().prepare('SELECT * FROM products WHERE id = ?').get(input.id);
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(input.id);
+}
+
+function adjustProductStock(input) {
+  if (!Number.isInteger(input?.productId) || input.productId <= 0) throw new Error('El producto no es válido.');
+  if (!Number.isInteger(input.quantityDelta) || input.quantityDelta === 0 || Math.abs(input.quantityDelta) > 2147483647) throw new Error('La cantidad de ajuste no es válida.');
+  if (typeof input.reason !== 'string' || !input.reason.trim() || input.reason.trim().length > 200) throw new Error('El motivo es obligatorio y debe tener hasta 200 caracteres.');
+  const database = getDatabase();
+  const result = database.transaction(() => {
+    const product = database.prepare('SELECT stock FROM products WHERE id = ? AND active = 1').get(input.productId);
+    if (!product) throw new Error('El producto no existe.');
+    const next = product.stock + input.quantityDelta;
+    if (next < 0) throw new Error('El ajuste no puede dejar el stock en negativo.');
+    database.prepare('UPDATE products SET stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, input.productId);
+    database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) VALUES (?, ?, ?, ?, ?, ?, 'manual', NULL)`).run(input.productId, input.quantityDelta, product.stock, next, input.quantityDelta > 0 ? 'entry' : 'adjustment', input.reason.trim());
+  })();
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(input.productId);
+}
+
+function listInventoryMovements(productId, limit = 200, filters = {}) {
+  const database = getDatabase();
+  const conditions = []; const params = [];
+  if (Number.isInteger(productId) && productId > 0) { conditions.push('m.product_id = ?'); params.push(productId); }
+  if (filters.type && filters.type !== 'all') { conditions.push('m.type = ?'); params.push(filters.type); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return database.prepare(`SELECT m.*, p.name AS product_name FROM inventory_movements m JOIN products p ON p.id = m.product_id ${where} ORDER BY datetime(m.created_at) DESC, m.id DESC LIMIT ?`).all(...params, limit);
 }
 
 function createSale(input) {
@@ -304,6 +355,7 @@ function createSale(input) {
     const sale = database.prepare(`INSERT INTO sales (total_cents, payment_method, amount_received_cents, change_cents, customer_name, notes) VALUES (?, ?, ?, ?, ?, ?)`).run(input.totalCents, input.paymentMethod, input.amountReceivedCents, input.changeCents, input.customerName || '', input.notes || '');
     const insertItem = database.prepare(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price_cents, subtotal_cents, unit_cost_cents, cost_total_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     const updateStock = database.prepare('UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND stock >= ?');
+    const insertInventoryMovement = database.prepare(`INSERT INTO inventory_movements (product_id, quantity_delta, stock_before, stock_after, type, reason, reference_type, reference_id) SELECT ?, ?, stock + ?, stock, 'sale', ?, 'sale', ? FROM products WHERE id = ?`);
     const findProduct = database.prepare('SELECT id, name, price_cents, cost_cents FROM products WHERE id = ? AND active = 1');
     const movement = database.prepare(`INSERT INTO cash_movements (type, amount_cents, reference_id, register_id, description) VALUES ('sale', ?, ?, ?, ?)`);
     let calculatedTotal = 0;
@@ -317,6 +369,7 @@ function createSale(input) {
       calculatedTotal += subtotal;
       const changed = updateStock.run(item.quantity, item.productId, item.quantity);
       if (changed.changes !== 1) throw new Error(`Insufficient stock for product ${item.productId}`);
+      insertInventoryMovement.run(item.productId, -item.quantity, item.quantity, `Venta #${sale.lastInsertRowid}`, sale.lastInsertRowid, item.productId);
       insertItem.run(sale.lastInsertRowid, product.id, product.name, item.quantity, item.unitPriceCents, subtotal, product.cost_cents, product.cost_cents * item.quantity);
     }
     if (calculatedTotal !== input.totalCents) throw new Error('El total de la venta no es válido.');
@@ -487,4 +540,4 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, createSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, adjustProductStock, listInventoryMovements, createSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('salesApi', {
     list: () => ipcRenderer.invoke('products:list'),
     create: (input) => ipcRenderer.invoke('products:create', input),
     update: (input) => ipcRenderer.invoke('products:update', input),
+    adjustStock: (input) => ipcRenderer.invoke('products:adjust-stock', input),
+    movements: (productId, limit, filters) => ipcRenderer.invoke('products:movements', productId, limit, filters),
   },
   sales: {
     create: (input) => ipcRenderer.invoke('sales:create', input),
