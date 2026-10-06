@@ -8,6 +8,7 @@ const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
 const SCHEMA_VERSION = 3;
+const OLLAMA_MODELS = ['gpt-oss:20b-cloud', 'gpt-oss:120b-cloud', 'gemma4:cloud', 'gemma4:31b-cloud', 'nemotron-3-super:cloud', 'nemotron-3-nano:30b-cloud'];
 const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'sale_voids', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users', 'inventory_movements'];
 
 let db;
@@ -516,6 +517,22 @@ function getSettings() {
   return { businessName: values.businessName || 'Pollo & Caja', currency: values.currency || 'ARS', lowStockThreshold: Number(values.lowStockThreshold) || 10 };
 }
 
+function getOllamaSettings() {
+  const rows = getDatabase().prepare("SELECT key, value FROM settings WHERE key IN ('ollamaModel', 'ollamaConfigured')").all();
+  const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  return { model: OLLAMA_MODELS.includes(values.ollamaModel) ? values.ollamaModel : OLLAMA_MODELS[0], configured: values.ollamaConfigured === '1' };
+}
+
+function saveOllamaModel(model) {
+  if (typeof model !== 'string' || !OLLAMA_MODELS.includes(model)) throw new Error('El modelo seleccionado no es válido.');
+  getDatabase().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('ollamaModel', model);
+  return getOllamaSettings();
+}
+
+function updateOllamaConfigured(configured) {
+  getDatabase().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('ollamaConfigured', configured ? '1' : '0');
+}
+
 function updateSettings(input) {
   const businessName = String(input.businessName || '').trim();
   const currency = String(input.currency || '').trim().toUpperCase();
@@ -582,4 +599,4 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, getOllamaSettings, saveOllamaModel, updateOllamaConfigured, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

@@ -2,6 +2,7 @@ const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const database = require('./database.cjs');
+const credentials = require('./credentials.cjs');
 const XLSX = require('xlsx');
 const { buildWorkbook } = require('../scripts/export-report.cjs');
 
@@ -82,6 +83,10 @@ function registerIpc() {
   ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
   ipcMain.handle('settings:get', () => database.getSettings());
   ipcMain.handle('settings:update', (_event, input) => database.updateSettings(input));
+  ipcMain.handle('ai:get-config', () => ({ ...database.getOllamaSettings(), ...credentials.getStatus() }));
+  ipcMain.handle('ai:set-key', (_event, key) => { const result = credentials.saveApiKey(key); database.updateOllamaConfigured(true); return { ...database.getOllamaSettings(), ...result }; });
+  ipcMain.handle('ai:clear-key', () => { const result = credentials.clearApiKey(); database.updateOllamaConfigured(false); return { ...database.getOllamaSettings(), ...result }; });
+  ipcMain.handle('ai:save-model', (_event, model) => database.saveOllamaModel(model));
   ipcMain.handle('auth:login', (_event, input) => database.authenticateAdmin(input?.email, input?.password));
   ipcMain.handle('auth:change-password', (_event, input) => database.changeAdminPassword(input?.currentPassword, input?.newPassword));
   ipcMain.handle('export:data', async (_event, format) => {
