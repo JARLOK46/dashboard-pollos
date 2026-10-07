@@ -13,7 +13,10 @@ function buildWorkbook(sales, expenses, report = null) {
     ['RESUMEN'],
     ['Fecha del reporte', report?.businessDate || ''],
     ['Ventas registradas', report?.orders ?? sales.length],
-    ['Ingresos por ventas', report?.totalCents != null ? report.totalCents / 100 : totalSales / 100],
+    [
+      'Ingresos por ventas',
+      report?.totalCents != null ? report.totalCents / 100 : totalSales / 100,
+    ],
     ['Efectivo', report?.paymentSplit ? report.paymentSplit.cashCents / 100 : ''],
     ['Tarjeta', report?.paymentSplit ? report.paymentSplit.cardCents / 100 : ''],
     ['Costo de ventas', report?.costCents != null ? report.costCents / 100 : ''],
@@ -24,15 +27,47 @@ function buildWorkbook(sales, expenses, report = null) {
     ['Resultado neto', (totalSales - totalExpenses) / 100],
   ];
   const salesRows = [['ID', 'Fecha', 'Productos', 'Total', 'Método de pago', 'Recibido', 'Vuelto']];
-  for (const sale of sales) salesRows.push([`#${sale.id}`, sale.created_at, sale.items.map((item) => `${item.quantity} x ${item.product_name}`).join(' | '), sale.total_cents / 100, sale.payment_method === 'cash' ? 'Efectivo' : 'Tarjeta', sale.amount_received_cents / 100, sale.change_cents / 100]);
+  for (const sale of sales)
+    salesRows.push([
+      `#${sale.id}`,
+      sale.created_at,
+      sale.items.map((item) => `${item.quantity} x ${item.product_name}`).join(' | '),
+      sale.total_cents / 100,
+      sale.payment_method === 'cash' ? 'Efectivo' : 'Tarjeta',
+      sale.amount_received_cents / 100,
+      sale.change_cents / 100,
+    ]);
   const expenseRows = [['ID', 'Fecha', 'Descripción', 'Categoría', 'Monto', 'Notas']];
-  for (const expense of expenses) expenseRows.push([`#${expense.id}`, expense.created_at, expense.description, expense.category, expense.amount_cents / 100, expense.notes || '']);
+  for (const expense of expenses)
+    expenseRows.push([
+      `#${expense.id}`,
+      expense.created_at,
+      expense.description,
+      expense.category,
+      expense.amount_cents / 100,
+      expense.notes || '',
+    ]);
   const summarySheet = XLSX.utils.aoa_to_sheet(summary);
   const salesSheet = XLSX.utils.aoa_to_sheet(salesRows);
   const expensesSheet = XLSX.utils.aoa_to_sheet(expenseRows);
   summarySheet['!cols'] = [{ wch: 28 }, { wch: 20 }];
-  salesSheet['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 40 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 14 }];
-  expensesSheet['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 32 }, { wch: 18 }, { wch: 14 }, { wch: 35 }];
+  salesSheet['!cols'] = [
+    { wch: 10 },
+    { wch: 22 },
+    { wch: 40 },
+    { wch: 14 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 14 },
+  ];
+  expensesSheet['!cols'] = [
+    { wch: 10 },
+    { wch: 22 },
+    { wch: 32 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 35 },
+  ];
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumen');
   XLSX.utils.book_append_sheet(workbook, salesSheet, 'Ventas');
   XLSX.utils.book_append_sheet(workbook, expensesSheet, 'Gastos');
