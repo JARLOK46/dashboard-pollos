@@ -44,17 +44,28 @@ function buildAiSnapshot() {
     alertas: database.getDashboardAlerts(),
   }), currency);
 }
-const AI_TOOL_NAMES = new Set(['create_expense']);
+const AI_TOOL_NAMES = new Set(['create_expense', 'cash_withdrawal', 'stock_adjustment', 'create_product']);
 const EXPENSE_CATEGORIES = new Set(['insumos', 'servicios', 'personal', 'other']);
+const textArg = (args, key, max = 200) => typeof args[key] === 'string' && args[key].trim().length > 0 && args[key].trim().length <= max ? args[key].trim() : null;
+const centsArg = (args, key, positive = true, allowZero = false) => Number.isSafeInteger(args[key]) && (positive ? (allowZero ? args[key] >= 0 : args[key] > 0) : args[key] !== 0) && Math.abs(args[key]) <= 2147483647 ? args[key] : null;
 function validateAiToolCall(toolCall) {
   if (!toolCall || typeof toolCall !== 'object' || !AI_TOOL_NAMES.has(toolCall.name)) return null;
   const args = toolCall.arguments;
   if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
-  const description = typeof args.description === 'string' ? args.description.trim() : '';
-  const category = typeof args.category === 'string' ? args.category.trim().toLowerCase() : '';
-  const amountCents = args.amountCents;
-  if (!description || description.length > 200 || !Number.isSafeInteger(amountCents) || amountCents <= 0 || amountCents > 2147483647 || !EXPENSE_CATEGORIES.has(category)) return null;
-  return { name: 'create_expense', arguments: { description, amountCents, category } };
+  if (toolCall.name === 'create_expense') {
+    const description = textArg(args, 'description'); const category = typeof args.category === 'string' ? args.category.trim().toLowerCase() : ''; const amountCents = centsArg(args, 'amountCents');
+    return description && amountCents && EXPENSE_CATEGORIES.has(category) ? { name: toolCall.name, arguments: { description, amountCents, category } } : null;
+  }
+  if (toolCall.name === 'cash_withdrawal') {
+    const reason = textArg(args, 'reason'); const amountCents = centsArg(args, 'amountCents');
+    return reason && amountCents ? { name: toolCall.name, arguments: { reason, amountCents } } : null;
+  }
+  if (toolCall.name === 'stock_adjustment') {
+    const productId = args.productId; const quantityDelta = centsArg(args, 'quantityDelta', false); const reason = textArg(args, 'reason');
+    return Number.isSafeInteger(productId) && productId > 0 && quantityDelta && reason ? { name: toolCall.name, arguments: { productId, quantityDelta, reason } } : null;
+  }
+  const name = textArg(args, 'name', 120); const description = typeof args.description === 'string' && args.description.trim().length <= 500 ? args.description.trim() : null; const priceCents = centsArg(args, 'priceCents', true, true); const costCents = centsArg(args, 'costCents', true, true); const stock = args.stock;
+  return name && description !== null && priceCents !== null && costCents !== null && Number.isSafeInteger(stock) && stock >= 0 && stock <= 2147483647 ? { name: toolCall.name, arguments: { name, description, priceCents, costCents, stock } } : null;
 }
 function parseAiResponse(text, currency) {
   const fallback = { text: text.trim(), period: null, source: 'Datos operativos locales', metrics: [], toolCall: null, currency };
@@ -73,7 +84,7 @@ async function analyzeWithOllama(question, history = [], mode = 'question') {
   if (!settings.model) throw new Error('El modelo seleccionado no es válido.');
   const key = credentials.getApiKey();
   const snapshot = buildAiSnapshot();
-  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}],"toolCall":null}. Solo si el dueño pidió registrar un gasto, podés proponer toolCall con exactamente {"name":"create_expense","arguments":{"description":"texto","amountCents":12345,"category":"insumos|servicios|personal|other"}}. amountCents es entero positivo en centavos. Nunca ejecutes herramientas ni afirmes que registraste nada: toolCall es únicamente una propuesta pendiente de confirmación humana. Para cualquier otra consulta, toolCall debe ser null. Si no podés cumplirlo, respondé texto plano. Los importes deben ser completos y conservar ${snapshot.moneda}.`;
+  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}],"toolCall":null}. Solo podés proponer, nunca ejecutar, toolCall para una acción explícitamente solicitada: gasto {"name":"create_expense","arguments":{"description":"texto","amountCents":12345,"category":"insumos|servicios|personal|other"}}, retiro {"name":"cash_withdrawal","arguments":{"reason":"texto","amountCents":12345}}, ajuste de stock {"name":"stock_adjustment","arguments":{"productId":1,"quantityDelta":-2,"reason":"texto"}} o producto {"name":"create_product","arguments":{"name":"texto","description":"texto","priceCents":12345,"costCents":5000,"stock":10}}. Todos los campos son estrictos (enteros en centavos, IDs positivos, texto acotado). Nunca ejecutes herramientas ni afirmes que registraste nada: toolCall es únicamente una propuesta explícita pendiente de confirmación humana. Para cualquier otra consulta, toolCall debe ser null. Si no podés cumplirlo, respondé texto plano. Los importes deben ser completos y conservar ${snapshot.moneda}.`;
   const boundedHistory = Array.isArray(history) ? history.slice(-AI_LIMITS.contextMessages).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', content: String(item.content || '').slice(0, 1500) })).slice(-AI_LIMITS.contextMessages) : [];
   const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es ${snapshot.moneda}. Todos los importes financieros ya están expresados en unidades monetarias completas, no en centavos. No vuelvas a dividirlos ni los multipliques. Conservá la moneda ${snapshot.moneda} en todas las respuestas.\n\n${outputContract}\n\nModo: ${mode === 'daily-summary' ? 'generá un resumen diario accionable del negocio' : 'respondé la pregunta'}\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
   const contextText = JSON.stringify(boundedHistory);
