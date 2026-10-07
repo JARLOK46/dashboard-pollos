@@ -2,7 +2,7 @@
 
 type DailyReport = { businessDate: string; orders: number; totalCents: number; costCents: number; grossProfitCents: number; marginPercent: number; paymentSplit: { cashCents: number; cardCents: number }; expenses: Array<{ category: string; total_cents: number; count: number }>; expensesTotalCents: number; withdrawalsTotalCents: number; withdrawals: unknown[]; cash: { openingCents: number | null; expectedCents: number | null; countedCents: number | null; differenceCents: number | null; status: string }; sales: unknown[] };
 
-type AiToolCall = { name: 'create_expense'; arguments: { description: string; amountCents: number; category: string } } | { name: 'cash_withdrawal'; arguments: { reason: string; amountCents: number } } | { name: 'stock_adjustment'; arguments: { productId: number; quantityDelta: number; reason: string } } | { name: 'create_product'; arguments: { name: string; description: string; priceCents: number; costCents: number; stock: number } };
+type AiToolCall = { name: 'create_expense'; arguments: { description: string; amountCents: number; category: string } } | { name: 'cash_withdrawal'; arguments: { reason: string; amountCents: number } } | { name: 'stock_adjustment'; arguments: { productId: number; quantityDelta: number; reason: string } } | { name: 'create_product'; arguments: { name: string; description: string; priceCents: number; costCents: number; stock: number } } | { name: 'void_sale'; arguments: { saleId: number; reason: string; sale?: { total_cents?: number; items?: Array<{ product_name: string; quantity: number }> } } };
 
 type Product = {
   id: number; name: string; description: string; price_cents: number; cost_cents: number; stock: number; image_path: string | null;
