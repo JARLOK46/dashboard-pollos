@@ -7,9 +7,9 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const OLLAMA_MODELS = ['gpt-oss:20b', 'gpt-oss:120b', 'gemma4:31b', 'nemotron-3-nano:30b', 'nemotron-3-super', 'nemotron-3-ultra'];
-const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'sale_voids', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users', 'inventory_movements'];
+const REQUIRED_TABLES = ['products', 'sales', 'sale_items', 'sale_voids', 'expenses', 'cash_registers', 'cash_movements', 'settings', 'users', 'inventory_movements', 'ai_sessions', 'ai_messages'];
 
 let db;
 
@@ -124,6 +124,23 @@ function migrate(database) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS ai_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      text TEXT NOT NULL,
+      period TEXT,
+      source TEXT,
+      metrics_json TEXT NOT NULL DEFAULT '[]',
+      tool_call_json TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('businessName', 'Pollo & Caja'),
       ('currency', 'ARS'),
@@ -131,6 +148,7 @@ function migrate(database) {
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
     CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created ON inventory_movements(product_id, datetime(created_at) DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_session_created ON ai_messages(session_id, id);
   `);
   const productColumns = database.prepare('PRAGMA table_info(products)').all().map((column) => column.name);
   if (!productColumns.includes('cost_cents')) database.exec('ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (cost_cents >= 0)');
@@ -520,6 +538,16 @@ function closeCashRegister(countedCents) {
   return { id: register.id, expectedCents, countedCents, differenceCents };
 }
 
+function validateAiSessionId(id) { if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)) throw new Error('La sesión de IA no es válida.'); return id; }
+function validateAiText(text) { if (typeof text !== 'string' || !text.trim() || text.length > 16000) throw new Error('El mensaje de IA no es válido.'); return text.trim(); }
+function aiTitle(text) { return text.length > 48 ? `${text.slice(0, 48)}…` : text; }
+function parseAiJson(value, fallback) { try { const parsed = JSON.parse(value); return parsed; } catch { return fallback; } }
+function createAiSession(input = {}) { const id = validateAiSessionId(input.id); const title = validateAiText(input.title || 'Nuevo chat').slice(0, 120); const database = getDatabase(); database.prepare('INSERT INTO ai_sessions (id, title) VALUES (?, ?)').run(id, title); return { id, title, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [] }; }
+function getOrCreateAiSession(input = {}) { const id = validateAiSessionId(input.id); const title = validateAiText(input.title || 'Nuevo chat').slice(0, 120); const database = getDatabase(); database.prepare('INSERT OR IGNORE INTO ai_sessions (id, title) VALUES (?, ?)').run(id, title); return getAiSession(id); }
+function listAiSessions(limit) { if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error('El límite de sesiones no es válido.'); const query = 'SELECT s.*, COUNT(m.id) AS message_count FROM ai_sessions s LEFT JOIN ai_messages m ON m.session_id = s.id GROUP BY s.id ORDER BY datetime(s.updated_at) DESC'; return (limit === undefined ? getDatabase().prepare(query).all() : getDatabase().prepare(`${query} LIMIT ?`).all(limit)); }
+function getAiSession(id) { validateAiSessionId(id); const database = getDatabase(); const session = database.prepare('SELECT * FROM ai_sessions WHERE id = ?').get(id); if (!session) return null; const messages = database.prepare('SELECT role, text, period, source, metrics_json, tool_call_json, created_at FROM ai_messages WHERE session_id = ? ORDER BY id').all(id).map(message => ({ role: message.role, text: message.text, period: message.period, source: message.source, metrics: parseAiJson(message.metrics_json, []), toolCall: message.tool_call_json ? parseAiJson(message.tool_call_json, null) : null, created_at: message.created_at })); return { ...session, messages }; }
+function appendAiMessage(input) { const sessionId = validateAiSessionId(input?.sessionId); const role = input?.role; if (role !== 'user' && role !== 'assistant') throw new Error('El rol del mensaje no es válido.'); const text = validateAiText(input.text); const period = input.period == null ? null : validateAiText(input.period).slice(0, 200); const source = input.source == null ? null : validateAiText(input.source).slice(0, 200); const metrics = input.metrics == null ? [] : input.metrics; const toolCall = input.toolCall == null ? null : input.toolCall; if (!Array.isArray(metrics) || metrics.length > 20) throw new Error('Las métricas no son válidas.'); const database = getDatabase(); const result = database.transaction(() => { const session = database.prepare('SELECT title FROM ai_sessions WHERE id = ?').get(sessionId); if (!session) throw new Error('La sesión no existe.'); const message = database.prepare('INSERT INTO ai_messages (session_id, role, text, period, source, metrics_json, tool_call_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(sessionId, role, text, period, source, JSON.stringify(metrics), toolCall == null ? null : JSON.stringify(toolCall)); const title = session.title === 'Nuevo chat' && role === 'user' ? aiTitle(text) : session.title; database.prepare('UPDATE ai_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(title, sessionId); return { id: Number(result), sessionId, title }; })(); return result; }
+
 function getSettings() {
   const rows = getDatabase().prepare('SELECT key, value FROM settings').all();
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
@@ -608,4 +636,4 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, archiveProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, getOllamaSettings, saveOllamaModel, updateOllamaConfigured, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+module.exports = { getDatabase, createAiSession, getOrCreateAiSession, listAiSessions, getAiSession, appendAiMessage, listProducts, createProduct, updateProduct, archiveProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, getOllamaSettings, saveOllamaModel, updateOllamaConfigured, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

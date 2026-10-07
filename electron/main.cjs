@@ -196,6 +196,11 @@ function registerIpc() {
   ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
   ipcMain.handle('settings:get', () => database.getSettings());
   ipcMain.handle('settings:update', (_event, input) => database.updateSettings(input));
+  ipcMain.handle('ai:sessions:list', (_event, limit) => database.listAiSessions(limit));
+  ipcMain.handle('ai:sessions:get', (_event, id) => database.getAiSession(id));
+  ipcMain.handle('ai:sessions:create', (_event, input) => database.createAiSession(input));
+  ipcMain.handle('ai:sessions:get-or-create', (_event, input) => database.getOrCreateAiSession(input));
+  ipcMain.handle('ai:sessions:append', (_event, input) => database.appendAiMessage(input));
   ipcMain.handle('ai:get-config', () => ({ ...database.getOllamaSettings(), ...credentials.getStatus() }));
   ipcMain.handle('ai:set-key', (_event, key) => { const result = credentials.saveApiKey(key); database.updateOllamaConfigured(true); return { ...database.getOllamaSettings(), ...result }; });
   ipcMain.handle('ai:clear-key', () => { const result = credentials.clearApiKey(); database.updateOllamaConfigured(false); return { ...database.getOllamaSettings(), ...result }; });
