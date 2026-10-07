@@ -17,11 +17,13 @@ The model may only propose validated arguments. The renderer shows an editable p
 - Sending image bytes to the model.
 
 ## Tasks
-1. Extend backend proposal schema and validation — pending
-2. Add reusable confirmation previews — pending
-3. Integrate previews in floating chat and workspace — pending
-4. Verify typecheck/build and manual flows — pending
-5. Commit, push, and generate release — pending
+1. Extend backend proposal schema and validation — complete
+2. Add reusable confirmation previews — complete
+3. Integrate previews in floating chat and workspace — complete
+4. Normalize AI monetary tool arguments to integer cents — complete
+5. Refresh app state after successful confirmed mutations — complete
+6. Verify typecheck and diff hygiene — complete
+7. Commit, push, and generate release — intentionally deferred
 
 ## Acceptance criteria
 - Each tool is allowlisted and strictly validated in the main process.
