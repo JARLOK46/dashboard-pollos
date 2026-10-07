@@ -2375,3 +2375,30 @@ html, body { overflow:hidden; }
 .dark-theme .ai-workspace-chat .ai-chat-form input { background:#232a34; border-color:#414b5a; color:#f4f7fb; }
 .dark-theme .ai-workspace-chat .ai-chat-form input::placeholder { color:#9da8b6; }
 @media(max-width:760px){.ai-workspace-chat{height:calc(100vh - 118px);min-height:460px}.ai-workspace-header{align-items:flex-start;flex-direction:column;padding:18px}.ai-workspace-header-actions{width:100%}.ai-workspace-header-actions button{flex:1}.ai-workspace-messages{padding-left:14px;padding-right:14px}.ai-workspace-chat .ai-suggestions{grid-template-columns:1fr}.ai-workspace-chat .ai-chat-form{padding-left:14px;padding-right:14px}.ai-workspace-chat .ai-disclaimer{padding-left:14px;padding-right:14px}}
+
+/* Keep the primary AI action exactly as wide as the suggestion grid. */
+.ai-empty > .ai-daily-action,
+.ai-empty > .ai-suggestions {
+  width:100%;
+}
+.ai-workspace-chat .ai-empty > .ai-daily-action,
+.ai-workspace-chat .ai-empty > .ai-suggestions {
+  width:min(600px,100%);
+  margin-left:auto;
+  margin-right:auto;
+}
+
+/* Empty-state supporting copy should sit naturally on its card surface. */
+.empty-state span,
+.empty-chart small {
+  display:block;
+  background:var(--surface,#fff);
+  color:var(--muted,#7e8a9b);
+  border-radius:7px;
+  padding:6px 10px;
+}
+.dark-theme .empty-state span,
+.dark-theme .empty-chart small {
+  background:#202c3b;
+  color:#c0ccd9;
+}
