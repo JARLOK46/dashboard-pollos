@@ -2,139 +2,3392 @@ import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-type Product = { id: number; name: string; description: string; price_cents: number; cost_cents: number; stock: number; image_path: string | null };
-type SaleItem = { product_id: number; product_name: string; quantity: number; unit_price_cents: number; subtotal_cents: number; unit_cost_cents?: number; cost_total_cents?: number };
-type SaleInput = { totalCents: number; paymentMethod: 'cash' | 'card'; amountReceivedCents: number; changeCents: number; items: Array<{ productId: number; productName: string; quantity: number; unitPriceCents: number; subtotalCents: number }> };
-type ProductInput = { id?: number; name: string; description: string; priceCents: number; costCents: number; stock: number; imagePath: string | null };
-type AiToolCall = { name: 'create_expense'; arguments: { description: string; amountCents: number; category: string } } | { name: 'cash_withdrawal'; arguments: { reason: string; amountCents: number } } | { name: 'stock_adjustment'; arguments: { productId: number; quantityDelta: number; reason: string } } | { name: 'create_product'; arguments: { name: string; description: string; priceCents: number; costCents: number; stock: number } } | { name: 'void_sale'; arguments: { saleId: number; reason: string; sale?: { total_cents?: number; items?: Array<{ product_name: string; quantity: number }> } } };
-type Sale = { id: number; total_cents: number; payment_method: 'cash' | 'card'; amount_received_cents: number; change_cents: number; customer_name?: string; notes?: string; status?: 'active' | 'voided'; voided_at?: string | null; void_reason?: string | null; void_record_reason?: string | null; void_recorded_at?: string | null; created_at: string; items: SaleItem[] };
-type Page = 'dashboard' | 'products' | 'checkout' | 'history' | 'expenses' | 'cash' | 'reports' | 'settings' | 'ai';
+type Product = {
+  id: number;
+  name: string;
+  description: string;
+  price_cents: number;
+  cost_cents: number;
+  stock: number;
+  image_path: string | null;
+};
+type SaleItem = {
+  product_id: number;
+  product_name: string;
+  quantity: number;
+  unit_price_cents: number;
+  subtotal_cents: number;
+  unit_cost_cents?: number;
+  cost_total_cents?: number;
+};
+type SaleInput = {
+  totalCents: number;
+  paymentMethod: 'cash' | 'card';
+  amountReceivedCents: number;
+  changeCents: number;
+  items: Array<{
+    productId: number;
+    productName: string;
+    quantity: number;
+    unitPriceCents: number;
+    subtotalCents: number;
+  }>;
+};
+type ProductInput = {
+  id?: number;
+  name: string;
+  description: string;
+  priceCents: number;
+  costCents: number;
+  stock: number;
+  imagePath: string | null;
+};
+type AiToolCall =
+  | {
+      name: 'create_expense';
+      arguments: { description: string; amountCents: number; category: string };
+    }
+  | { name: 'cash_withdrawal'; arguments: { reason: string; amountCents: number } }
+  | {
+      name: 'stock_adjustment';
+      arguments: { productId: number; quantityDelta: number; reason: string };
+    }
+  | {
+      name: 'create_product';
+      arguments: {
+        name: string;
+        description: string;
+        priceCents: number;
+        costCents: number;
+        stock: number;
+      };
+    }
+  | {
+      name: 'void_sale';
+      arguments: {
+        saleId: number;
+        reason: string;
+        sale?: { total_cents?: number; items?: Array<{ product_name: string; quantity: number }> };
+      };
+    };
+type Sale = {
+  id: number;
+  total_cents: number;
+  payment_method: 'cash' | 'card';
+  amount_received_cents: number;
+  change_cents: number;
+  customer_name?: string;
+  notes?: string;
+  status?: 'active' | 'voided';
+  voided_at?: string | null;
+  void_reason?: string | null;
+  void_record_reason?: string | null;
+  void_recorded_at?: string | null;
+  created_at: string;
+  items: SaleItem[];
+};
+type Page =
+  | 'dashboard'
+  | 'products'
+  | 'checkout'
+  | 'history'
+  | 'expenses'
+  | 'cash'
+  | 'reports'
+  | 'settings'
+  | 'ai';
 type SettingsData = { businessName: string; currency: string; lowStockThreshold: number };
-const OLLAMA_MODELS = [{ id: 'gpt-oss:20b', label: 'GPT OSS 20B' }, { id: 'gpt-oss:120b', label: 'GPT OSS 120B' }, { id: 'gemma4:31b', label: 'Gemma 4 31B' }, { id: 'nemotron-3-nano:30b', label: 'Nemotron 3 Nano 30B' }, { id: 'nemotron-3-super', label: 'Nemotron 3 Super' }, { id: 'nemotron-3-ultra', label: 'Nemotron 3 Ultra' }];
-type DashboardAlert = { id: string; severity: 'critical' | 'warning' | 'info'; title: string; message: string; page: Page };
-const money = (cents: number) => `$ ${new Intl.NumberFormat('es-AR').format(Math.round(cents / 100))}`;
+const OLLAMA_MODELS = [
+  { id: 'gpt-oss:20b', label: 'GPT OSS 20B' },
+  { id: 'gpt-oss:120b', label: 'GPT OSS 120B' },
+  { id: 'gemma4:31b', label: 'Gemma 4 31B' },
+  { id: 'nemotron-3-nano:30b', label: 'Nemotron 3 Nano 30B' },
+  { id: 'nemotron-3-super', label: 'Nemotron 3 Super' },
+  { id: 'nemotron-3-ultra', label: 'Nemotron 3 Ultra' },
+];
+type DashboardAlert = {
+  id: string;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  message: string;
+  page: Page;
+};
+const money = (cents: number) =>
+  `$ ${new Intl.NumberFormat('es-AR').format(Math.round(cents / 100))}`;
 function formatAIOutput(text: string) {
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/^\s*#{1,6}\s*/gm, '')
     .replace(/^\s*[-*]\s+/gm, '• ')
-    .replace(/^\s*\d+[.)]\s+/gm, match => `${match.trim().replace(/[.)]$/, '')}. `)
+    .replace(/^\s*\d+[.)]\s+/gm, (match) => `${match.trim().replace(/[.)]$/, '')}. `)
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
-const today = () => new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
+const today = () =>
+  new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
 const dateInput = (date: Date) => date.toISOString().slice(0, 10);
-const defaultRange = () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 6); return { from: dateInput(from), to: dateInput(to) }; };
+const defaultRange = () => {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - 6);
+  return { from: dateInput(from), to: dateInput(to) };
+};
 
 function App() {
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('pollo-caja-theme') === 'dark');
+  const [darkMode, setDarkMode] = useState(
+    () => localStorage.getItem('pollo-caja-theme') === 'dark',
+  );
   const [authenticated, setAuthenticated] = useState(false);
   const [adminEmail, setAdminEmail] = useState('admin@gmail.com');
   const [page, setPage] = useState<Page>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
-  const [summary, setSummary] = useState<{salesTodayCents:number;ordersToday:number;expensesTodayCents:number;lowStock:Product[]} | null>(null);
-  const [settings, setSettings] = useState<SettingsData>({ businessName: 'Pollo & Caja', currency: 'ARS', lowStockThreshold: 10 });
+  const [summary, setSummary] = useState<{
+    salesTodayCents: number;
+    ordersToday: number;
+    expensesTodayCents: number;
+    lowStock: Product[];
+  } | null>(null);
+  const [settings, setSettings] = useState<SettingsData>({
+    businessName: 'Pollo & Caja',
+    currency: 'ARS',
+    lowStockThreshold: 10,
+  });
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
-  const refresh = async () => { const [p, s, d, config, currentAlerts] = await Promise.all([window.salesApi.products.list(), window.salesApi.sales.list(100), window.salesApi.dashboard.summary(), window.salesApi.settings.get(), window.salesApi.dashboard.alerts()]); setProducts(p); setSales(s as Sale[]); setSummary(d as typeof summary); setSettings(config); setAlerts(currentAlerts as DashboardAlert[]); };
-  useEffect(() => { refresh(); }, []);
-  useEffect(() => { localStorage.setItem('pollo-caja-theme', darkMode ? 'dark' : 'light'); }, [darkMode]);
+  const refresh = async () => {
+    const [p, s, d, config, currentAlerts] = await Promise.all([
+      window.salesApi.products.list(),
+      window.salesApi.sales.list(100),
+      window.salesApi.dashboard.summary(),
+      window.salesApi.settings.get(),
+      window.salesApi.dashboard.alerts(),
+    ]);
+    setProducts(p);
+    setSales(s as Sale[]);
+    setSummary(d as typeof summary);
+    setSettings(config);
+    setAlerts(currentAlerts as DashboardAlert[]);
+  };
+  useEffect(() => {
+    refresh();
+  }, []);
+  useEffect(() => {
+    localStorage.setItem('pollo-caja-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
   const navigate = (next: Page) => setPage(next);
-  if (!authenticated) return <><TitleBar /><Login onLogin={(email) => { setAdminEmail(email); setAuthenticated(true); }} /></>;
-  const logout = () => { setAuthenticated(false); setPage('dashboard'); setAlerts([]); setProducts([]); setSales([]); setSummary(null); };
-  return <div className={darkMode ? 'app-shell dark-theme' : 'app-shell'}><TitleBar /><div className="theme-shell" /><Sidebar page={page} navigate={navigate} /><main className="main-content"><header className={`topbar ${page === 'dashboard' ? 'service-pulse' : ''}`}><div><p className="eyebrow">{today().toUpperCase()}</p><h1>{page === 'dashboard' ? `Buen día, ${settings.businessName} 👋` : page === 'products' ? 'Productos' : page === 'checkout' ? 'Nueva venta' : page === 'settings' ? 'Configuración' : page === 'reports' ? 'Reportes' : page === 'ai' ? 'Asistente IA' : 'Historial de ventas'}</h1><p className="subtitle">{page === 'dashboard' ? 'Este es el resumen de tu negocio hoy.' : page === 'ai' ? 'Entendé tu operación con ayuda de inteligencia artificial.' : 'Gestioná tu operación de forma simple y rápida.'}</p></div><div className="top-actions"><NotificationCenter alerts={alerts} navigate={navigate} /><button className="theme-toggle" title={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'} onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀' : '☾'}</button><ProfileMenu email={adminEmail} navigate={navigate} onLogout={logout} /></div></header>{page === 'dashboard' && <Dashboard summary={summary} sales={sales} navigate={navigate} />}{page === 'products' && <Products products={products} refresh={refresh} navigate={navigate} />}{page === 'checkout' && <Checkout products={products} onSaved={async () => { await refresh(); navigate('history'); }} />}{page === 'history' && <History sales={sales} onVoided={refresh} />}{page === 'reports' && <Reports />}{page === 'expenses' && <Expenses onChanged={refresh} />}{page === 'cash' && <CashRegister onChanged={refresh} />}{page === 'settings' && <Settings settings={settings} onSaved={async () => { await refresh(); }} />}{page === 'ai' && <AIWorkspace refresh={refresh} />}</main><AIChat visible={page !== 'ai'} refresh={refresh} /></div>;
+  if (!authenticated)
+    return (
+      <>
+        <TitleBar />
+        <Login
+          onLogin={(email) => {
+            setAdminEmail(email);
+            setAuthenticated(true);
+          }}
+        />
+      </>
+    );
+  const logout = () => {
+    setAuthenticated(false);
+    setPage('dashboard');
+    setAlerts([]);
+    setProducts([]);
+    setSales([]);
+    setSummary(null);
+  };
+  return (
+    <div className={darkMode ? 'app-shell dark-theme' : 'app-shell'}>
+      <TitleBar />
+      <div className="theme-shell" />
+      <Sidebar page={page} navigate={navigate} />
+      <main className="main-content">
+        <header className={`topbar ${page === 'dashboard' ? 'service-pulse' : ''}`}>
+          <div>
+            <p className="eyebrow">{today().toUpperCase()}</p>
+            <h1>
+              {page === 'dashboard'
+                ? `Buen día, ${settings.businessName} 👋`
+                : page === 'products'
+                  ? 'Productos'
+                  : page === 'checkout'
+                    ? 'Nueva venta'
+                    : page === 'settings'
+                      ? 'Configuración'
+                      : page === 'reports'
+                        ? 'Reportes'
+                        : page === 'ai'
+                          ? 'Asistente IA'
+                          : 'Historial de ventas'}
+            </h1>
+            <p className="subtitle">
+              {page === 'dashboard'
+                ? 'Este es el resumen de tu negocio hoy.'
+                : page === 'ai'
+                  ? 'Entendé tu operación con ayuda de inteligencia artificial.'
+                  : 'Gestioná tu operación de forma simple y rápida.'}
+            </p>
+          </div>
+          <div className="top-actions">
+            <NotificationCenter alerts={alerts} navigate={navigate} />
+            <button
+              className="theme-toggle"
+              title={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'}
+              onClick={() => setDarkMode(!darkMode)}
+            >
+              {darkMode ? '☀' : '☾'}
+            </button>
+            <ProfileMenu email={adminEmail} navigate={navigate} onLogout={logout} />
+          </div>
+        </header>
+        {page === 'dashboard' && <Dashboard summary={summary} sales={sales} navigate={navigate} />}
+        {page === 'products' && (
+          <Products products={products} refresh={refresh} navigate={navigate} />
+        )}
+        {page === 'checkout' && (
+          <Checkout
+            products={products}
+            onSaved={async () => {
+              await refresh();
+              navigate('history');
+            }}
+          />
+        )}
+        {page === 'history' && <History sales={sales} onVoided={refresh} />}
+        {page === 'reports' && <Reports />}
+        {page === 'expenses' && <Expenses onChanged={refresh} />}
+        {page === 'cash' && <CashRegister onChanged={refresh} />}
+        {page === 'settings' && (
+          <Settings
+            settings={settings}
+            onSaved={async () => {
+              await refresh();
+            }}
+          />
+        )}
+        {page === 'ai' && <AIWorkspace refresh={refresh} />}
+      </main>
+      <AIChat visible={page !== 'ai'} refresh={refresh} />
+    </div>
+  );
 }
-function ExpenseToolPreview({ toolCall, currency, onCancel, refresh }: { toolCall: AiToolCall; currency: string; onCancel: () => void; refresh: () => Promise<void> }) {
-  const [draft, setDraft] = useState<any>(toolCall.arguments); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [done, setDone] = useState(false); const [image, setImage] = useState<string | null>(null);
-  const submit = async () => { if (busy) return; setError(''); const validText = (value: unknown, max: number) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max; const validCents = (value: unknown, allowZero = false) => typeof value === 'number' && Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1) && value <= 2147483647; if (toolCall.name === 'create_expense' && (!validText(draft.description, 200) || !validCents(draft.amountCents) || !['insumos', 'servicios', 'personal', 'other'].includes(draft.category))) return setError('Revisá la descripción, el monto y la categoría.'); if (toolCall.name === 'cash_withdrawal' && (!validText(draft.reason, 200) || !validCents(draft.amountCents))) return setError('Revisá el motivo y el monto.'); if (toolCall.name === 'stock_adjustment' && (!Number.isSafeInteger(draft.productId) || draft.productId <= 0 || !Number.isSafeInteger(draft.quantityDelta) || draft.quantityDelta === 0 || Math.abs(draft.quantityDelta) > 2147483647 || !validText(draft.reason, 200))) return setError('Revisá el producto, la cantidad y el motivo.'); if (toolCall.name === 'create_product' && (!validText(draft.name, 120) || typeof draft.description !== 'string' || draft.description.trim().length > 500 || !validCents(draft.priceCents, true) || !validCents(draft.costCents, true) || !Number.isSafeInteger(draft.stock) || draft.stock < 0 || draft.stock > 2147483647)) return setError('Revisá los datos del producto.'); if (toolCall.name === 'void_sale' && (!Number.isSafeInteger(draft.saleId) || draft.saleId <= 0 || !validText(draft.reason, 200))) return setError('Revisá la venta y el motivo.'); setBusy(true); try { if (toolCall.name === 'create_expense') await window.salesApi.expenses.create(draft); else if (toolCall.name === 'cash_withdrawal') await window.salesApi.cash.withdraw(draft); else if (toolCall.name === 'stock_adjustment') await window.salesApi.products.adjustStock(draft); else if (toolCall.name === 'void_sale') await window.salesApi.sales.void(draft.saleId, draft.reason.trim()); else await window.salesApi.products.create({ ...draft, imagePath: image }); await refresh(); setDone(true); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo completar la acción.'); } finally { setBusy(false); } };
-  const title = toolCall.name === 'create_expense' ? 'gasto' : toolCall.name === 'cash_withdrawal' ? 'retiro de efectivo' : toolCall.name === 'stock_adjustment' ? 'ajuste de stock' : toolCall.name === 'void_sale' ? 'anulación de venta' : 'producto';
-  const chooseImage = (file?: File) => { if (!file) return; if (!file.type.startsWith('image/')) return setError('Elegí una imagen.'); if (file.size > 5 * 1024 * 1024) return setError('La imagen no puede superar 5 MB.'); const reader = new FileReader(); reader.onload = () => setImage(String(reader.result)); reader.onerror = () => setError('No se pudo leer la imagen.'); reader.readAsDataURL(file); };
-  if (done) return <div className="ai-tool-preview success-message" role="status">{title[0].toUpperCase() + title.slice(1)} registrado. <button type="button" className="link-button" onClick={onCancel}>Cerrar</button></div>;
+function ExpenseToolPreview({
+  toolCall,
+  currency,
+  onCancel,
+  refresh,
+}: {
+  toolCall: AiToolCall;
+  currency: string;
+  onCancel: () => void;
+  refresh: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<any>(toolCall.arguments);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+  const [image, setImage] = useState<string | null>(null);
+  const submit = async () => {
+    if (busy) return;
+    setError('');
+    const validText = (value: unknown, max: number) =>
+      typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max;
+    const validCents = (value: unknown, allowZero = false) =>
+      typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= (allowZero ? 0 : 1) &&
+      value <= 2147483647;
+    if (
+      toolCall.name === 'create_expense' &&
+      (!validText(draft.description, 200) ||
+        !validCents(draft.amountCents) ||
+        !['insumos', 'servicios', 'personal', 'other'].includes(draft.category))
+    )
+      return setError('Revisá la descripción, el monto y la categoría.');
+    if (
+      toolCall.name === 'cash_withdrawal' &&
+      (!validText(draft.reason, 200) || !validCents(draft.amountCents))
+    )
+      return setError('Revisá el motivo y el monto.');
+    if (
+      toolCall.name === 'stock_adjustment' &&
+      (!Number.isSafeInteger(draft.productId) ||
+        draft.productId <= 0 ||
+        !Number.isSafeInteger(draft.quantityDelta) ||
+        draft.quantityDelta === 0 ||
+        Math.abs(draft.quantityDelta) > 2147483647 ||
+        !validText(draft.reason, 200))
+    )
+      return setError('Revisá el producto, la cantidad y el motivo.');
+    if (
+      toolCall.name === 'create_product' &&
+      (!validText(draft.name, 120) ||
+        typeof draft.description !== 'string' ||
+        draft.description.trim().length > 500 ||
+        !validCents(draft.priceCents, true) ||
+        !validCents(draft.costCents, true) ||
+        !Number.isSafeInteger(draft.stock) ||
+        draft.stock < 0 ||
+        draft.stock > 2147483647)
+    )
+      return setError('Revisá los datos del producto.');
+    if (
+      toolCall.name === 'void_sale' &&
+      (!Number.isSafeInteger(draft.saleId) || draft.saleId <= 0 || !validText(draft.reason, 200))
+    )
+      return setError('Revisá la venta y el motivo.');
+    setBusy(true);
+    try {
+      if (toolCall.name === 'create_expense') await window.salesApi.expenses.create(draft);
+      else if (toolCall.name === 'cash_withdrawal') await window.salesApi.cash.withdraw(draft);
+      else if (toolCall.name === 'stock_adjustment')
+        await window.salesApi.products.adjustStock(draft);
+      else if (toolCall.name === 'void_sale')
+        await window.salesApi.sales.void(draft.saleId, draft.reason.trim());
+      else await window.salesApi.products.create({ ...draft, imagePath: image });
+      await refresh();
+      setDone(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo completar la acción.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const title =
+    toolCall.name === 'create_expense'
+      ? 'gasto'
+      : toolCall.name === 'cash_withdrawal'
+        ? 'retiro de efectivo'
+        : toolCall.name === 'stock_adjustment'
+          ? 'ajuste de stock'
+          : toolCall.name === 'void_sale'
+            ? 'anulación de venta'
+            : 'producto';
+  const chooseImage = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setError('Elegí una imagen.');
+    if (file.size > 5 * 1024 * 1024) return setError('La imagen no puede superar 5 MB.');
+    const reader = new FileReader();
+    reader.onload = () => setImage(String(reader.result));
+    reader.onerror = () => setError('No se pudo leer la imagen.');
+    reader.readAsDataURL(file);
+  };
+  if (done)
+    return (
+      <div className="ai-tool-preview success-message" role="status">
+        {title[0].toUpperCase() + title.slice(1)} registrado.{' '}
+        <button type="button" className="link-button" onClick={onCancel}>
+          Cerrar
+        </button>
+      </div>
+    );
   const amount = 'amountCents' in draft;
-  return <div className="ai-tool-preview" role="region" aria-label={`Vista previa de ${title} propuesto`}><strong>Propuesta de {title}</strong><p>Revisá los datos: nada se guarda hasta que confirmes.</p>{toolCall.name === 'create_expense' && <><label>Descripción<input value={draft.description} maxLength={200} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label><label>Monto ({currency})<input type="number" min="0.01" step="0.01" value={(draft.amountCents / 100).toFixed(2)} onChange={e => setDraft({ ...draft, amountCents: Math.round(Number(e.target.value) * 100) })} /></label><label>Categoría<select value={draft.category} onChange={e => setDraft({ ...draft, category: e.target.value })}><option value="insumos">Insumos</option><option value="servicios">Servicios</option><option value="personal">Personal</option><option value="other">Otros</option></select></label></>}{toolCall.name === 'cash_withdrawal' && <><label>Motivo<input value={draft.reason} maxLength={200} onChange={e => setDraft({ ...draft, reason: e.target.value })} /></label><label>Monto ({currency})<input type="number" min="0.01" step="0.01" value={(draft.amountCents / 100).toFixed(2)} onChange={e => setDraft({ ...draft, amountCents: Math.round(Number(e.target.value) * 100) })} /></label></>}{toolCall.name === 'stock_adjustment' && <><label>Producto ID<input type="number" min="1" value={draft.productId} onChange={e => setDraft({ ...draft, productId: Number(e.target.value) })} /></label><label>Cantidad<input type="number" value={draft.quantityDelta} onChange={e => setDraft({ ...draft, quantityDelta: Number(e.target.value) })} /></label><label>Motivo<input value={draft.reason} maxLength={200} onChange={e => setDraft({ ...draft, reason: e.target.value })} /></label></>}{toolCall.name === 'void_sale' && <><p><strong>Venta #{draft.saleId}</strong>{draft.sale?.total_cents != null && ` · Total ${currency} ${(draft.sale.total_cents / 100).toFixed(2)}`}</p>{draft.sale?.items?.length ? <small>Items: {draft.sale.items.map((item: SaleItem) => `${item.quantity} × ${item.product_name}`).join(', ')}</small> : <small>Se anulará la venta identificada por este ID.</small>}<label>Motivo<input value={draft.reason} maxLength={200} onChange={e => setDraft({ ...draft, reason: e.target.value })} /></label></>}{toolCall.name === 'create_product' && <><label>Nombre<input value={draft.name} maxLength={120} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label><label>Precio ({currency})<input type="number" min="0" step="0.01" value={(draft.priceCents / 100).toFixed(2)} onChange={e => setDraft({ ...draft, priceCents: Math.round(Number(e.target.value) * 100) })} /></label><label>Costo ({currency})<input type="number" min="0" step="0.01" value={(draft.costCents / 100).toFixed(2)} onChange={e => setDraft({ ...draft, costCents: Math.round(Number(e.target.value) * 100) })} /></label><label>Stock<input type="number" min="0" value={draft.stock} onChange={e => setDraft({ ...draft, stock: Number(e.target.value) })} /></label><label>Imagen opcional<input type="file" accept="image/*" onChange={e => chooseImage(e.target.files?.[0])} /></label>{image && <div className="image-preview-wrap"><img className="image-preview" src={image} alt="Vista previa" /><button type="button" className="link-button" onClick={() => setImage(null)}>Quitar imagen</button></div>}</>}{error && <p className="form-error" role="alert">{error}</p>}<small className="ai-tool-risk">⚠ La acción requiere tu confirmación.</small><div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>Cancelar</button><button type="button" className="primary-button" disabled={busy} onClick={() => void submit()}>{busy ? 'Guardando…' : 'Confirmar y registrar'}</button></div></div>;
+  return (
+    <div
+      className="ai-tool-preview"
+      role="region"
+      aria-label={`Vista previa de ${title} propuesto`}
+    >
+      <strong>Propuesta de {title}</strong>
+      <p>Revisá los datos: nada se guarda hasta que confirmes.</p>
+      {toolCall.name === 'create_expense' && (
+        <>
+          <label>
+            Descripción
+            <input
+              value={draft.description}
+              maxLength={200}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+            />
+          </label>
+          <label>
+            Monto ({currency})
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={(draft.amountCents / 100).toFixed(2)}
+              onChange={(e) =>
+                setDraft({ ...draft, amountCents: Math.round(Number(e.target.value) * 100) })
+              }
+            />
+          </label>
+          <label>
+            Categoría
+            <select
+              value={draft.category}
+              onChange={(e) => setDraft({ ...draft, category: e.target.value })}
+            >
+              <option value="insumos">Insumos</option>
+              <option value="servicios">Servicios</option>
+              <option value="personal">Personal</option>
+              <option value="other">Otros</option>
+            </select>
+          </label>
+        </>
+      )}
+      {toolCall.name === 'cash_withdrawal' && (
+        <>
+          <label>
+            Motivo
+            <input
+              value={draft.reason}
+              maxLength={200}
+              onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+            />
+          </label>
+          <label>
+            Monto ({currency})
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={(draft.amountCents / 100).toFixed(2)}
+              onChange={(e) =>
+                setDraft({ ...draft, amountCents: Math.round(Number(e.target.value) * 100) })
+              }
+            />
+          </label>
+        </>
+      )}
+      {toolCall.name === 'stock_adjustment' && (
+        <>
+          <label>
+            Producto ID
+            <input
+              type="number"
+              min="1"
+              value={draft.productId}
+              onChange={(e) => setDraft({ ...draft, productId: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Cantidad
+            <input
+              type="number"
+              value={draft.quantityDelta}
+              onChange={(e) => setDraft({ ...draft, quantityDelta: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Motivo
+            <input
+              value={draft.reason}
+              maxLength={200}
+              onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+            />
+          </label>
+        </>
+      )}
+      {toolCall.name === 'void_sale' && (
+        <>
+          <p>
+            <strong>Venta #{draft.saleId}</strong>
+            {draft.sale?.total_cents != null &&
+              ` · Total ${currency} ${(draft.sale.total_cents / 100).toFixed(2)}`}
+          </p>
+          {draft.sale?.items?.length ? (
+            <small>
+              Items:{' '}
+              {draft.sale.items
+                .map((item: SaleItem) => `${item.quantity} × ${item.product_name}`)
+                .join(', ')}
+            </small>
+          ) : (
+            <small>Se anulará la venta identificada por este ID.</small>
+          )}
+          <label>
+            Motivo
+            <input
+              value={draft.reason}
+              maxLength={200}
+              onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+            />
+          </label>
+        </>
+      )}
+      {toolCall.name === 'create_product' && (
+        <>
+          <label>
+            Nombre
+            <input
+              value={draft.name}
+              maxLength={120}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+          </label>
+          <label>
+            Precio ({currency})
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={(draft.priceCents / 100).toFixed(2)}
+              onChange={(e) =>
+                setDraft({ ...draft, priceCents: Math.round(Number(e.target.value) * 100) })
+              }
+            />
+          </label>
+          <label>
+            Costo ({currency})
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={(draft.costCents / 100).toFixed(2)}
+              onChange={(e) =>
+                setDraft({ ...draft, costCents: Math.round(Number(e.target.value) * 100) })
+              }
+            />
+          </label>
+          <label>
+            Stock
+            <input
+              type="number"
+              min="0"
+              value={draft.stock}
+              onChange={(e) => setDraft({ ...draft, stock: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Imagen opcional
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => chooseImage(e.target.files?.[0])}
+            />
+          </label>
+          {image && (
+            <div className="image-preview-wrap">
+              <img className="image-preview" src={image} alt="Vista previa" />
+              <button type="button" className="link-button" onClick={() => setImage(null)}>
+                Quitar imagen
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      <small className="ai-tool-risk">⚠ La acción requiere tu confirmación.</small>
+      <div className="modal-actions">
+        <button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={busy}
+          onClick={() => void submit()}
+        >
+          {busy ? 'Guardando…' : 'Confirmar y registrar'}
+        </button>
+      </div>
+    </div>
+  );
 }
 function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () => Promise<void> }) {
-  type Message = { role: 'user' | 'assistant'; text: string; period?: string | null; source?: string; metrics?: Array<{ label: string; value: string; detail?: string }>; toolCall?: AiToolCall | null };
+  type Message = {
+    role: 'user' | 'assistant';
+    text: string;
+    period?: string | null;
+    source?: string;
+    metrics?: Array<{ label: string; value: string; detail?: string }>;
+    toolCall?: AiToolCall | null;
+  };
   type Conversation = { id: string; title: string; updatedAt: number; messages: Message[] };
-  const firstConversation = (): Conversation => ({ id: 'default-ai-session', title: 'Nuevo chat', updatedAt: Date.now(), messages: [] });
-  const [open, setOpen] = useState(false); const [question, setQuestion] = useState(''); const [conversations, setConversations] = useState<Conversation[]>(() => [firstConversation()]); const [activeId, setActiveId] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [configured, setConfigured] = useState<boolean | null>(null); const [historyOpen, setHistoryOpen] = useState(false); const [currency, setCurrency] = useState('ARS');
-  const inputRef = useRef<HTMLInputElement>(null); const chatBodyRef = useRef<HTMLDivElement>(null);
-  const activeConversation = conversations.find(conversation => conversation.id === activeId) ?? conversations[0];
+  const firstConversation = (): Conversation => ({
+    id: 'default-ai-session',
+    title: 'Nuevo chat',
+    updatedAt: Date.now(),
+    messages: [],
+  });
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [conversations, setConversations] = useState<Conversation[]>(() => [firstConversation()]);
+  const [activeId, setActiveId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [currency, setCurrency] = useState('ARS');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === activeId) ?? conversations[0];
   const messages = activeConversation?.messages ?? [];
-  const suggestions = ['¿Cómo fueron las ventas de hoy?', '¿Qué productos tienen poco stock?', '¿Cuál fue mi ganancia esta semana?', '¿Qué alerta debería atender primero?'];
-  useEffect(() => { if (!activeId && conversations[0]) setActiveId(conversations[0].id); }, [activeId, conversations]);
-  useEffect(() => { window.salesApi.ai.getConfig().then(config => setConfigured(config.configured)).catch(() => setConfigured(null)); window.salesApi.settings.get().then(config => setCurrency(config.currency || 'ARS')).catch(() => undefined); window.salesApi.ai.sessions.list().then(async list => { const rows = await Promise.all(list.map(async item => { const full = await window.salesApi.ai.sessions.get(item.id); return full ? { id: full.id, title: full.title, updatedAt: Date.parse(full.updated_at) || Date.now(), messages: full.messages } : null; })); const loaded = rows.filter(Boolean) as Conversation[]; if (loaded.length) { setConversations(loaded); setActiveId(loaded[0].id); } else { const fresh = firstConversation(); const persisted = await window.salesApi.ai.sessions.getOrCreate({ id: fresh.id, title: fresh.title }); if (persisted) { setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]); setActiveId(persisted.id); } } }).catch(() => undefined); }, []);
-  useEffect(() => { const openChat = () => { setOpen(true); setHistoryOpen(false); }; window.addEventListener('open-ai-chat', openChat); return () => window.removeEventListener('open-ai-chat', openChat); }, []);
-  useEffect(() => { if (open && !historyOpen) inputRef.current?.focus(); }, [open, historyOpen]);
-  useEffect(() => { if (open) chatBodyRef.current?.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, busy, open]);
-  const updateActive = (update: (conversation: Conversation) => Conversation) => setConversations(previous => previous.map(conversation => conversation.id === activeConversation?.id ? update(conversation) : conversation));
-  const newChat = async () => { const conversation = firstConversation(); try { await window.salesApi.ai.sessions.create({ id: conversation.id, title: conversation.title }); setConversations(previous => [conversation, ...previous]); setActiveId(conversation.id); setQuestion(''); setError(''); setHistoryOpen(false); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.'); } };
-  const selectConversation = (id: string) => { setActiveId(id); setQuestion(''); setError(''); setHistoryOpen(false); };
-  const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => { const text = value.trim(); if (!text || busy || !activeConversation) return; const prior = messages.slice(-8).map(item => ({ role: item.role, content: item.text })); const userMessage: Message = { role: 'user', text }; setQuestion(''); setError(''); let persistedSession; try { persistedSession = await window.salesApi.ai.sessions.getOrCreate({ id: activeConversation.id, title: activeConversation.title }); await window.salesApi.ai.sessions.append({ sessionId: persistedSession.id, role: 'user', text }); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.'); return; } updateActive(conversation => ({ ...conversation, id: persistedSession.id, title: persistedSession.title, updatedAt: Date.now(), messages: [...conversation.messages, userMessage] })); setBusy(true); try { const answer = await window.salesApi.ai.analyze(text, prior, mode); const savedAssistant = await window.salesApi.ai.sessions.append({ sessionId: activeConversation.id, role: 'assistant', text: answer.text, period: answer.period, source: answer.source, metrics: answer.metrics, toolCall: answer.toolCall }); updateActive(conversation => ({ ...conversation, title: savedAssistant.title || conversation.title, updatedAt: Date.now(), messages: [...conversation.messages, { role: 'assistant', text: answer.text, period: answer.period, source: answer.source, metrics: answer.metrics, toolCall: answer.toolCall }] })); } catch (cause) { const message = cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.'; setError(message); } finally { setBusy(false); } };
-  return <>{visible && open && <section className="ai-chat-panel" role="dialog" aria-labelledby="ai-chat-title"><div className="ai-chat-header"><div><strong id="ai-chat-title">Asistente de Pollo &amp; Caja</strong><span>Consultas sobre tu operación</span></div><div className="ai-header-actions"><button type="button" onClick={newChat}>Nuevo chat</button><button type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen(value => !value)}>Historial</button><button type="button" className="ai-close" aria-label="Cerrar asistente" onClick={() => setOpen(false)}>×</button></div></div>{historyOpen && <aside className="ai-history-drawer" aria-label="Historial de chats"><div className="ai-history-heading"><div><strong>Historial</strong><span>{conversations.length} {conversations.length === 1 ? 'chat' : 'chats'} en esta sesión</span></div><button type="button" aria-label="Cerrar historial" onClick={() => setHistoryOpen(false)}>×</button></div><div className="ai-history-list">{conversations.map(conversation => <button type="button" key={conversation.id} className={`ai-history-item ${conversation.id === activeConversation?.id ? 'selected' : ''}`} onClick={() => selectConversation(conversation.id)}><strong>{conversation.title}</strong><span>{conversation.messages.length} {conversation.messages.length === 1 ? 'mensaje' : 'mensajes'} · {new Date(conversation.updatedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span></button>)}</div></aside>}<div ref={chatBodyRef} className="ai-chat-body" aria-live="polite">{!messages.length && <div className="ai-empty"><div className="ai-empty-icon">✦</div><h3>¿En qué te ayudo?</h3><p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p><button type="button" className="ai-daily-action" onClick={() => send('Analizar mi negocio hoy', 'daily-summary')}>✦ Analizar mi negocio</button><div className="ai-suggestions">{suggestions.map(item => <button type="button" key={item} onClick={() => send(item)}>{item}</button>)}</div></div>}{messages.map((message, index) => <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}><div className="ai-message-bubble"><span className="ai-message-content">{formatAIOutput(message.text)}</span>{message.role === 'assistant' && message.metrics?.length ? <div className="ai-metrics">{message.metrics.map((metric, metricIndex) => <div className="ai-metric" key={`${metric.label}-${metricIndex}`}><small>{metric.label}</small><strong>{metric.value}</strong>{metric.detail && <span>{metric.detail}</span>}</div>)}</div> : null}{message.role === 'assistant' && message.toolCall && <ExpenseToolPreview toolCall={message.toolCall} currency={currency} refresh={refresh} onCancel={() => updateActive(conversation => ({ ...conversation, messages: conversation.messages.map((entry, entryIndex) => entryIndex === index ? { ...entry, toolCall: null } : entry) }))} />}{message.role === 'assistant' && (message.period || message.source) && <small className="ai-meta">{message.period && `Período: ${message.period}`} {message.source && ` · Fuente: ${message.source}`}</small>}</div></div>)}{busy && <div className="ai-message assistant ai-loading"><span>Analizando<span className="ai-dots">…</span></span></div>}{error && <p className="ai-error" role="alert">{configured === false ? 'La clave de Ollama Cloud no está configurada. Podés agregarla en Configuración → IA.' : error}</p>}</div><p className="ai-disclaimer">La IA solo propone acciones. Nada se modifica sin tu confirmación.</p><form className="ai-chat-form" onSubmit={event => { event.preventDefault(); void send(); }}><label className="sr-only" htmlFor="ai-question">Escribí tu pregunta</label><input id="ai-question" ref={inputRef} value={question} onChange={event => setQuestion(event.target.value)} placeholder="Escribí una pregunta…" disabled={busy} /><button type="submit" aria-label="Enviar pregunta" disabled={busy || !question.trim()}>↑</button></form></section>}{visible && <button type="button" className={`ai-fab ${open ? 'is-open' : ''}`} aria-label={open ? 'Cerrar asistente de IA' : 'Abrir asistente de IA'} aria-expanded={open} onClick={() => setOpen(value => !value)}><span>✦</span><b>IA</b></button>}</>;
+  const suggestions = [
+    '¿Cómo fueron las ventas de hoy?',
+    '¿Qué productos tienen poco stock?',
+    '¿Cuál fue mi ganancia esta semana?',
+    '¿Qué alerta debería atender primero?',
+  ];
+  useEffect(() => {
+    if (!activeId && conversations[0]) setActiveId(conversations[0].id);
+  }, [activeId, conversations]);
+  useEffect(() => {
+    window.salesApi.ai
+      .getConfig()
+      .then((config) => setConfigured(config.configured))
+      .catch(() => setConfigured(null));
+    window.salesApi.settings
+      .get()
+      .then((config) => setCurrency(config.currency || 'ARS'))
+      .catch(() => undefined);
+    window.salesApi.ai.sessions
+      .list()
+      .then(async (list) => {
+        const rows = await Promise.all(
+          list.map(async (item) => {
+            const full = await window.salesApi.ai.sessions.get(item.id);
+            return full
+              ? {
+                  id: full.id,
+                  title: full.title,
+                  updatedAt: Date.parse(full.updated_at) || Date.now(),
+                  messages: full.messages,
+                }
+              : null;
+          }),
+        );
+        const loaded = rows.filter(Boolean) as Conversation[];
+        if (loaded.length) {
+          setConversations(loaded);
+          setActiveId(loaded[0].id);
+        } else {
+          const fresh = firstConversation();
+          const persisted = await window.salesApi.ai.sessions.getOrCreate({
+            id: fresh.id,
+            title: fresh.title,
+          });
+          if (persisted) {
+            setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
+            setActiveId(persisted.id);
+          }
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const openChat = () => {
+      setOpen(true);
+      setHistoryOpen(false);
+    };
+    window.addEventListener('open-ai-chat', openChat);
+    return () => window.removeEventListener('open-ai-chat', openChat);
+  }, []);
+  useEffect(() => {
+    if (open && !historyOpen) inputRef.current?.focus();
+  }, [open, historyOpen]);
+  useEffect(() => {
+    if (open)
+      chatBodyRef.current?.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, busy, open]);
+  const updateActive = (update: (conversation: Conversation) => Conversation) =>
+    setConversations((previous) =>
+      previous.map((conversation) =>
+        conversation.id === activeConversation?.id ? update(conversation) : conversation,
+      ),
+    );
+  const newChat = async () => {
+    const conversation = firstConversation();
+    try {
+      await window.salesApi.ai.sessions.create({ id: conversation.id, title: conversation.title });
+      setConversations((previous) => [conversation, ...previous]);
+      setActiveId(conversation.id);
+      setQuestion('');
+      setError('');
+      setHistoryOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.');
+    }
+  };
+  const selectConversation = (id: string) => {
+    setActiveId(id);
+    setQuestion('');
+    setError('');
+    setHistoryOpen(false);
+  };
+  const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => {
+    const text = value.trim();
+    if (!text || busy || !activeConversation) return;
+    const prior = messages.slice(-8).map((item) => ({ role: item.role, content: item.text }));
+    const userMessage: Message = { role: 'user', text };
+    setQuestion('');
+    setError('');
+    let persistedSession;
+    try {
+      persistedSession = await window.salesApi.ai.sessions.getOrCreate({
+        id: activeConversation.id,
+        title: activeConversation.title,
+      });
+      await window.salesApi.ai.sessions.append({
+        sessionId: persistedSession.id,
+        role: 'user',
+        text,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.');
+      return;
+    }
+    updateActive((conversation) => ({
+      ...conversation,
+      id: persistedSession.id,
+      title: persistedSession.title,
+      updatedAt: Date.now(),
+      messages: [...conversation.messages, userMessage],
+    }));
+    setBusy(true);
+    try {
+      const answer = await window.salesApi.ai.analyze(text, prior, mode);
+      const savedAssistant = await window.salesApi.ai.sessions.append({
+        sessionId: activeConversation.id,
+        role: 'assistant',
+        text: answer.text,
+        period: answer.period,
+        source: answer.source,
+        metrics: answer.metrics,
+        toolCall: answer.toolCall,
+      });
+      updateActive((conversation) => ({
+        ...conversation,
+        title: savedAssistant.title || conversation.title,
+        updatedAt: Date.now(),
+        messages: [
+          ...conversation.messages,
+          {
+            role: 'assistant',
+            text: answer.text,
+            period: answer.period,
+            source: answer.source,
+            metrics: answer.metrics,
+            toolCall: answer.toolCall,
+          },
+        ],
+      }));
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.';
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      {visible && open && (
+        <section className="ai-chat-panel" role="dialog" aria-labelledby="ai-chat-title">
+          <div className="ai-chat-header">
+            <div>
+              <strong id="ai-chat-title">Asistente de Pollo &amp; Caja</strong>
+              <span>Consultas sobre tu operación</span>
+            </div>
+            <div className="ai-header-actions">
+              <button type="button" onClick={newChat}>
+                Nuevo chat
+              </button>
+              <button
+                type="button"
+                aria-expanded={historyOpen}
+                onClick={() => setHistoryOpen((value) => !value)}
+              >
+                Historial
+              </button>
+              <button
+                type="button"
+                className="ai-close"
+                aria-label="Cerrar asistente"
+                onClick={() => setOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          {historyOpen && (
+            <aside className="ai-history-drawer" aria-label="Historial de chats">
+              <div className="ai-history-heading">
+                <div>
+                  <strong>Historial</strong>
+                  <span>
+                    {conversations.length} {conversations.length === 1 ? 'chat' : 'chats'} en esta
+                    sesión
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Cerrar historial"
+                  onClick={() => setHistoryOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="ai-history-list">
+                {conversations.map((conversation) => (
+                  <button
+                    type="button"
+                    key={conversation.id}
+                    className={`ai-history-item ${conversation.id === activeConversation?.id ? 'selected' : ''}`}
+                    onClick={() => selectConversation(conversation.id)}
+                  >
+                    <strong>{conversation.title}</strong>
+                    <span>
+                      {conversation.messages.length}{' '}
+                      {conversation.messages.length === 1 ? 'mensaje' : 'mensajes'} ·{' '}
+                      {new Date(conversation.updatedAt).toLocaleTimeString('es-AR', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </aside>
+          )}
+          <div ref={chatBodyRef} className="ai-chat-body" aria-live="polite">
+            {!messages.length && (
+              <div className="ai-empty">
+                <div className="ai-empty-icon">✦</div>
+                <h3>¿En qué te ayudo?</h3>
+                <p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p>
+                <button
+                  type="button"
+                  className="ai-daily-action"
+                  onClick={() => send('Analizar mi negocio hoy', 'daily-summary')}
+                >
+                  ✦ Analizar mi negocio
+                </button>
+                <div className="ai-suggestions">
+                  {suggestions.map((item) => (
+                    <button type="button" key={item} onClick={() => send(item)}>
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {messages.map((message, index) => (
+              <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}>
+                <div className="ai-message-bubble">
+                  <span className="ai-message-content">{formatAIOutput(message.text)}</span>
+                  {message.role === 'assistant' && message.metrics?.length ? (
+                    <div className="ai-metrics">
+                      {message.metrics.map((metric, metricIndex) => (
+                        <div className="ai-metric" key={`${metric.label}-${metricIndex}`}>
+                          <small>{metric.label}</small>
+                          <strong>{metric.value}</strong>
+                          {metric.detail && <span>{metric.detail}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.role === 'assistant' && message.toolCall && (
+                    <ExpenseToolPreview
+                      toolCall={message.toolCall}
+                      currency={currency}
+                      refresh={refresh}
+                      onCancel={() =>
+                        updateActive((conversation) => ({
+                          ...conversation,
+                          messages: conversation.messages.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, toolCall: null } : entry,
+                          ),
+                        }))
+                      }
+                    />
+                  )}
+                  {message.role === 'assistant' && (message.period || message.source) && (
+                    <small className="ai-meta">
+                      {message.period && `Período: ${message.period}`}{' '}
+                      {message.source && ` · Fuente: ${message.source}`}
+                    </small>
+                  )}
+                </div>
+              </div>
+            ))}
+            {busy && (
+              <div className="ai-message assistant ai-loading">
+                <span>
+                  Analizando<span className="ai-dots">…</span>
+                </span>
+              </div>
+            )}
+            {error && (
+              <p className="ai-error" role="alert">
+                {configured === false
+                  ? 'La clave de Ollama Cloud no está configurada. Podés agregarla en Configuración → IA.'
+                  : error}
+              </p>
+            )}
+          </div>
+          <p className="ai-disclaimer">
+            La IA solo propone acciones. Nada se modifica sin tu confirmación.
+          </p>
+          <form
+            className="ai-chat-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
+            }}
+          >
+            <label className="sr-only" htmlFor="ai-question">
+              Escribí tu pregunta
+            </label>
+            <input
+              id="ai-question"
+              ref={inputRef}
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              placeholder="Escribí una pregunta…"
+              disabled={busy}
+            />
+            <button type="submit" aria-label="Enviar pregunta" disabled={busy || !question.trim()}>
+              ↑
+            </button>
+          </form>
+        </section>
+      )}
+      {visible && (
+        <button
+          type="button"
+          className={`ai-fab ${open ? 'is-open' : ''}`}
+          aria-label={open ? 'Cerrar asistente de IA' : 'Abrir asistente de IA'}
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span>✦</span>
+          <b>IA</b>
+        </button>
+      )}
+    </>
+  );
 }
 function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
-  type Message = { role: 'user' | 'assistant'; text: string; period?: string | null; source?: string; metrics?: Array<{ label: string; value: string; detail?: string }>; toolCall?: AiToolCall | null };
+  type Message = {
+    role: 'user' | 'assistant';
+    text: string;
+    period?: string | null;
+    source?: string;
+    metrics?: Array<{ label: string; value: string; detail?: string }>;
+    toolCall?: AiToolCall | null;
+  };
   type Conversation = { id: string; title: string; updatedAt: number; messages: Message[] };
-  const makeConversation = (): Conversation => ({ id: 'default-ai-session', title: 'Nuevo chat', updatedAt: Date.now(), messages: [] });
-  const suggestions = ['¿Cómo fueron las ventas de hoy?', '¿Qué productos tienen poco stock?', '¿Cuál fue mi ganancia esta semana?', '¿Qué alerta debería atender primero?'];
+  const makeConversation = (): Conversation => ({
+    id: 'default-ai-session',
+    title: 'Nuevo chat',
+    updatedAt: Date.now(),
+    messages: [],
+  });
+  const suggestions = [
+    '¿Cómo fueron las ventas de hoy?',
+    '¿Qué productos tienen poco stock?',
+    '¿Cuál fue mi ganancia esta semana?',
+    '¿Qué alerta debería atender primero?',
+  ];
   const [conversations, setConversations] = useState<Conversation[]>(() => [makeConversation()]);
-  const [activeId, setActiveId] = useState(''); const [question, setQuestion] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [historyOpen, setHistoryOpen] = useState(false); const [currency, setCurrency] = useState('ARS'); const bodyRef = useRef<HTMLDivElement>(null); const inputRef = useRef<HTMLInputElement>(null);
-  const active = conversations.find(item => item.id === activeId) ?? conversations[0]; const messages = active?.messages ?? [];
-  useEffect(() => { if (!activeId && conversations[0]) setActiveId(conversations[0].id); }, [activeId, conversations]);
-  useEffect(() => { window.salesApi.settings.get().then(settings => setCurrency(settings.currency || 'ARS')).catch(() => undefined); window.salesApi.ai.sessions.list().then(async list => { const rows = await Promise.all(list.map(async item => { const full = await window.salesApi.ai.sessions.get(item.id); return full ? { id: full.id, title: full.title, updatedAt: Date.parse(full.updated_at) || Date.now(), messages: full.messages } : null; })); const loaded = rows.filter(Boolean) as Conversation[]; if (loaded.length) { setConversations(loaded); setActiveId(loaded[0].id); } else { const fresh = makeConversation(); const persisted = await window.salesApi.ai.sessions.getOrCreate({ id: fresh.id, title: fresh.title }); if (persisted) { setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]); setActiveId(persisted.id); } } }).catch(() => undefined); }, []);
-  useEffect(() => { bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, busy]);
-  useEffect(() => { if (!historyOpen) inputRef.current?.focus(); }, [historyOpen]);
-  const updateActive = (update: (conversation: Conversation) => Conversation) => setConversations(previous => previous.map(item => item.id === active?.id ? update(item) : item));
-  const newChat = async () => { const conversation = makeConversation(); try { await window.salesApi.ai.sessions.create({ id: conversation.id, title: conversation.title }); setConversations(previous => [conversation, ...previous]); setActiveId(conversation.id); setQuestion(''); setError(''); setHistoryOpen(false); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.'); } };
-  const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => { const text = value.trim(); if (!text || busy || !active) return; const prior = messages.slice(-8).map(item => ({ role: item.role, content: item.text })); let persistedSession; try { persistedSession = await window.salesApi.ai.sessions.getOrCreate({ id: active.id, title: active.title }); await window.salesApi.ai.sessions.append({ sessionId: persistedSession.id, role: 'user', text }); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.'); return; } updateActive(item => ({ ...item, id: persistedSession.id, title: persistedSession.title, updatedAt: Date.now(), messages: [...item.messages, { role: 'user', text }] })); setQuestion(''); setError(''); setBusy(true); try { const answer = await window.salesApi.ai.analyze(text, prior, mode); const savedAssistant = await window.salesApi.ai.sessions.append({ sessionId: active.id, role: 'assistant', text: answer.text, period: answer.period, source: answer.source, metrics: answer.metrics, toolCall: answer.toolCall }); updateActive(item => ({ ...item, title: savedAssistant.title || item.title, updatedAt: Date.now(), messages: [...item.messages, { role: 'assistant', text: answer.text, period: answer.period, source: answer.source, metrics: answer.metrics, toolCall: answer.toolCall }] })); } catch (cause) { const message = cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.'; setError(message); } finally { setBusy(false); } };
-  return <section className="ai-workspace ai-workspace-chat" aria-labelledby="ai-workspace-title"><div className="ai-workspace-header"><div><div className="ai-workspace-kicker">✦ INTELIGENCIA PARA TU NEGOCIO</div><h2 id="ai-workspace-title">Asistente de Pollo &amp; Caja</h2><p>Consultá ventas, stock y rendimiento en lenguaje natural.</p></div><div className="ai-workspace-header-actions"><button type="button" className="secondary-button" onClick={newChat}>＋ Nuevo chat</button><button type="button" className="secondary-button" aria-expanded={historyOpen} onClick={() => setHistoryOpen(value => !value)}>Historial</button></div></div><div className="ai-workspace-content"><div ref={bodyRef} className="ai-workspace-messages" aria-live="polite">{historyOpen && <aside className="ai-workspace-history" aria-label="Historial de chats"><div className="ai-history-heading"><div><strong>Historial</strong><span>{conversations.length} {conversations.length === 1 ? 'chat' : 'chats'} en esta sesión</span></div><button type="button" aria-label="Cerrar historial" onClick={() => setHistoryOpen(false)}>×</button></div>{conversations.map(item => <button type="button" key={item.id} className={`ai-history-item ${item.id === active?.id ? 'selected' : ''}`} onClick={() => { setActiveId(item.id); setHistoryOpen(false); setError(''); }}>{item.title}<small>{item.messages.length} mensajes</small></button>)}</aside>}{!messages.length && !busy && <div className="ai-empty"><div className="ai-empty-icon">✦</div><h3>¿En qué te ayudo?</h3><p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p><button type="button" className="ai-daily-action" onClick={() => void send('Analizar mi negocio hoy', 'daily-summary')}>✦ Analizar mi negocio</button><div className="ai-suggestions">{suggestions.map(item => <button type="button" key={item} onClick={() => void send(item)}>{item}</button>)}</div></div>}{messages.map((message, index) => <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}><div className="ai-message-bubble"><span className="ai-message-content">{formatAIOutput(message.text)}</span>{message.role === 'assistant' && message.metrics?.length ? <div className="ai-metrics">{message.metrics.map((metric, metricIndex) => <div className="ai-metric" key={`${metric.label}-${metricIndex}`}><small>{metric.label}</small><strong>{metric.value}</strong>{metric.detail && <span>{metric.detail}</span>}</div>)}</div> : null}{message.role === 'assistant' && message.toolCall && <ExpenseToolPreview toolCall={message.toolCall} currency={currency} refresh={refresh} onCancel={() => updateActive(item => ({ ...item, messages: item.messages.map((entry, entryIndex) => entryIndex === index ? { ...entry, toolCall: null } : entry) }))} />}{message.role === 'assistant' && (message.period || message.source) && <small className="ai-meta">{message.period && `Período: ${message.period}`}{message.source && ` · Fuente: ${message.source}`}</small>}</div></div>)}{busy && <div className="ai-message assistant ai-loading"><span>Analizando<span className="ai-dots">…</span></span></div>}{error && <p className="ai-error" role="alert">{error}</p>}</div><p className="ai-disclaimer">La IA solo propone acciones. Nada se modifica sin tu confirmación.</p><form className="ai-chat-form" onSubmit={event => { event.preventDefault(); void send(); }}><label className="sr-only" htmlFor="workspace-question">Escribí tu pregunta</label><input id="workspace-question" ref={inputRef} value={question} onChange={event => setQuestion(event.target.value)} placeholder="Escribí una pregunta…" disabled={busy} /><button type="submit" aria-label="Enviar pregunta" disabled={busy || !question.trim()}>↑</button></form></div></section>;
+  const [activeId, setActiveId] = useState('');
+  const [question, setQuestion] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [currency, setCurrency] = useState('ARS');
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  const messages = active?.messages ?? [];
+  useEffect(() => {
+    if (!activeId && conversations[0]) setActiveId(conversations[0].id);
+  }, [activeId, conversations]);
+  useEffect(() => {
+    window.salesApi.settings
+      .get()
+      .then((settings) => setCurrency(settings.currency || 'ARS'))
+      .catch(() => undefined);
+    window.salesApi.ai.sessions
+      .list()
+      .then(async (list) => {
+        const rows = await Promise.all(
+          list.map(async (item) => {
+            const full = await window.salesApi.ai.sessions.get(item.id);
+            return full
+              ? {
+                  id: full.id,
+                  title: full.title,
+                  updatedAt: Date.parse(full.updated_at) || Date.now(),
+                  messages: full.messages,
+                }
+              : null;
+          }),
+        );
+        const loaded = rows.filter(Boolean) as Conversation[];
+        if (loaded.length) {
+          setConversations(loaded);
+          setActiveId(loaded[0].id);
+        } else {
+          const fresh = makeConversation();
+          const persisted = await window.salesApi.ai.sessions.getOrCreate({
+            id: fresh.id,
+            title: fresh.title,
+          });
+          if (persisted) {
+            setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
+            setActiveId(persisted.id);
+          }
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, busy]);
+  useEffect(() => {
+    if (!historyOpen) inputRef.current?.focus();
+  }, [historyOpen]);
+  const updateActive = (update: (conversation: Conversation) => Conversation) =>
+    setConversations((previous) =>
+      previous.map((item) => (item.id === active?.id ? update(item) : item)),
+    );
+  const newChat = async () => {
+    const conversation = makeConversation();
+    try {
+      await window.salesApi.ai.sessions.create({ id: conversation.id, title: conversation.title });
+      setConversations((previous) => [conversation, ...previous]);
+      setActiveId(conversation.id);
+      setQuestion('');
+      setError('');
+      setHistoryOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.');
+    }
+  };
+  const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => {
+    const text = value.trim();
+    if (!text || busy || !active) return;
+    const prior = messages.slice(-8).map((item) => ({ role: item.role, content: item.text }));
+    let persistedSession;
+    try {
+      persistedSession = await window.salesApi.ai.sessions.getOrCreate({
+        id: active.id,
+        title: active.title,
+      });
+      await window.salesApi.ai.sessions.append({
+        sessionId: persistedSession.id,
+        role: 'user',
+        text,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.');
+      return;
+    }
+    updateActive((item) => ({
+      ...item,
+      id: persistedSession.id,
+      title: persistedSession.title,
+      updatedAt: Date.now(),
+      messages: [...item.messages, { role: 'user', text }],
+    }));
+    setQuestion('');
+    setError('');
+    setBusy(true);
+    try {
+      const answer = await window.salesApi.ai.analyze(text, prior, mode);
+      const savedAssistant = await window.salesApi.ai.sessions.append({
+        sessionId: active.id,
+        role: 'assistant',
+        text: answer.text,
+        period: answer.period,
+        source: answer.source,
+        metrics: answer.metrics,
+        toolCall: answer.toolCall,
+      });
+      updateActive((item) => ({
+        ...item,
+        title: savedAssistant.title || item.title,
+        updatedAt: Date.now(),
+        messages: [
+          ...item.messages,
+          {
+            role: 'assistant',
+            text: answer.text,
+            period: answer.period,
+            source: answer.source,
+            metrics: answer.metrics,
+            toolCall: answer.toolCall,
+          },
+        ],
+      }));
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.';
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="ai-workspace ai-workspace-chat" aria-labelledby="ai-workspace-title">
+      <div className="ai-workspace-header">
+        <div>
+          <div className="ai-workspace-kicker">✦ INTELIGENCIA PARA TU NEGOCIO</div>
+          <h2 id="ai-workspace-title">Asistente de Pollo &amp; Caja</h2>
+          <p>Consultá ventas, stock y rendimiento en lenguaje natural.</p>
+        </div>
+        <div className="ai-workspace-header-actions">
+          <button type="button" className="secondary-button" onClick={newChat}>
+            ＋ Nuevo chat
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((value) => !value)}
+          >
+            Historial
+          </button>
+        </div>
+      </div>
+      <div className="ai-workspace-content">
+        <div ref={bodyRef} className="ai-workspace-messages" aria-live="polite">
+          {historyOpen && (
+            <aside className="ai-workspace-history" aria-label="Historial de chats">
+              <div className="ai-history-heading">
+                <div>
+                  <strong>Historial</strong>
+                  <span>
+                    {conversations.length} {conversations.length === 1 ? 'chat' : 'chats'} en esta
+                    sesión
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Cerrar historial"
+                  onClick={() => setHistoryOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              {conversations.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={`ai-history-item ${item.id === active?.id ? 'selected' : ''}`}
+                  onClick={() => {
+                    setActiveId(item.id);
+                    setHistoryOpen(false);
+                    setError('');
+                  }}
+                >
+                  {item.title}
+                  <small>{item.messages.length} mensajes</small>
+                </button>
+              ))}
+            </aside>
+          )}
+          {!messages.length && !busy && (
+            <div className="ai-empty">
+              <div className="ai-empty-icon">✦</div>
+              <h3>¿En qué te ayudo?</h3>
+              <p>Preguntame sobre ventas, stock y rendimiento de tu negocio.</p>
+              <button
+                type="button"
+                className="ai-daily-action"
+                onClick={() => void send('Analizar mi negocio hoy', 'daily-summary')}
+              >
+                ✦ Analizar mi negocio
+              </button>
+              <div className="ai-suggestions">
+                {suggestions.map((item) => (
+                  <button type="button" key={item} onClick={() => void send(item)}>
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((message, index) => (
+            <div className={`ai-message ${message.role}`} key={`${message.role}-${index}`}>
+              <div className="ai-message-bubble">
+                <span className="ai-message-content">{formatAIOutput(message.text)}</span>
+                {message.role === 'assistant' && message.metrics?.length ? (
+                  <div className="ai-metrics">
+                    {message.metrics.map((metric, metricIndex) => (
+                      <div className="ai-metric" key={`${metric.label}-${metricIndex}`}>
+                        <small>{metric.label}</small>
+                        <strong>{metric.value}</strong>
+                        {metric.detail && <span>{metric.detail}</span>}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {message.role === 'assistant' && message.toolCall && (
+                  <ExpenseToolPreview
+                    toolCall={message.toolCall}
+                    currency={currency}
+                    refresh={refresh}
+                    onCancel={() =>
+                      updateActive((item) => ({
+                        ...item,
+                        messages: item.messages.map((entry, entryIndex) =>
+                          entryIndex === index ? { ...entry, toolCall: null } : entry,
+                        ),
+                      }))
+                    }
+                  />
+                )}
+                {message.role === 'assistant' && (message.period || message.source) && (
+                  <small className="ai-meta">
+                    {message.period && `Período: ${message.period}`}
+                    {message.source && ` · Fuente: ${message.source}`}
+                  </small>
+                )}
+              </div>
+            </div>
+          ))}
+          {busy && (
+            <div className="ai-message assistant ai-loading">
+              <span>
+                Analizando<span className="ai-dots">…</span>
+              </span>
+            </div>
+          )}
+          {error && (
+            <p className="ai-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+        <p className="ai-disclaimer">
+          La IA solo propone acciones. Nada se modifica sin tu confirmación.
+        </p>
+        <form
+          className="ai-chat-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
+          }}
+        >
+          <label className="sr-only" htmlFor="workspace-question">
+            Escribí tu pregunta
+          </label>
+          <input
+            id="workspace-question"
+            ref={inputRef}
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Escribí una pregunta…"
+            disabled={busy}
+          />
+          <button type="submit" aria-label="Enviar pregunta" disabled={busy || !question.trim()}>
+            ↑
+          </button>
+        </form>
+      </div>
+    </section>
+  );
 }
-function TitleBar() { return <div className="title-bar"><div className="title-bar-brand"><div className="brand-mark small">P</div><strong>Pollo &amp; Caja</strong></div><div className="window-controls"><button onClick={() => window.salesApi.window.minimize()}>−</button><button onClick={() => window.salesApi.window.maximize()}>□</button><button className="close-control" onClick={() => window.salesApi.window.close()}>×</button></div></div> }
-function NotificationCenter({ alerts, navigate }: { alerts: DashboardAlert[]; navigate: (page: Page) => void }) {
+function TitleBar() {
+  return (
+    <div className="title-bar">
+      <div className="title-bar-brand">
+        <div className="brand-mark small">P</div>
+        <strong>Pollo &amp; Caja</strong>
+      </div>
+      <div className="window-controls">
+        <button onClick={() => window.salesApi.window.minimize()}>−</button>
+        <button onClick={() => window.salesApi.window.maximize()}>□</button>
+        <button className="close-control" onClick={() => window.salesApi.window.close()}>
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+function NotificationCenter({
+  alerts,
+  navigate,
+}: {
+  alerts: DashboardAlert[];
+  navigate: (page: Page) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const previousIds = useRef<string[]>([]);
   // Dismissals are deliberately kept in memory only. A refreshed alert with the same
   // identity stays dismissed, while a new backend identity is shown as new.
-  const activeAlerts = alerts.filter(alert => !dismissedIds.has(alert.id));
-  const unreadAlerts = activeAlerts.filter(alert => !readIds.has(alert.id));
-  const criticalCount = activeAlerts.filter(alert => alert.severity === 'critical').length;
+  const activeAlerts = alerts.filter((alert) => !dismissedIds.has(alert.id));
+  const unreadAlerts = activeAlerts.filter((alert) => !readIds.has(alert.id));
+  const criticalCount = activeAlerts.filter((alert) => alert.severity === 'critical').length;
   useEffect(() => {
-    const currentIds = alerts.map(alert => alert.id);
-    setReadIds(previous => new Set([...currentIds.filter(id => previousIds.current.includes(id) && previous.has(id))]));
+    const currentIds = alerts.map((alert) => alert.id);
+    setReadIds(
+      (previous) =>
+        new Set([
+          ...currentIds.filter((id) => previousIds.current.includes(id) && previous.has(id)),
+        ]),
+    );
     previousIds.current = currentIds;
   }, [alerts]);
-  useEffect(() => { if (open && unreadAlerts.length) setReadIds(previous => new Set([...previous, ...unreadAlerts.map(alert => alert.id)])); }, [open, unreadAlerts.length]);
-  const dismiss = (id: string) => setDismissedIds(previous => new Set([...previous, id]));
-  const dismissAll = () => setDismissedIds(previous => new Set([...previous, ...activeAlerts.map(alert => alert.id)]));
-  return <div className="notification-center"><button className={`notification-button ${unreadAlerts.length ? 'has-alerts' : ''}`} aria-label={`Abrir notificaciones${unreadAlerts.length ? `, ${unreadAlerts.length} sin leer` : ''}`} aria-expanded={open} onClick={() => setOpen(value => !value)}>♢{unreadAlerts.length > 0 && <i>{unreadAlerts.length > 9 ? '9+' : unreadAlerts.length}</i>}</button>{open && <div className="notification-popover" role="dialog" aria-label="Centro de alertas"><div className="notification-heading"><div><strong>Centro de alertas</strong><span>{activeAlerts.length ? `${activeAlerts.length} alertas` : 'Todo en orden'}</span></div><div className="notification-heading-actions">{activeAlerts.length > 0 && <button className="clear-all-button" aria-label="Descartar todas las alertas" onClick={dismissAll}>Limpiar todo</button>}<button aria-label="Cerrar notificaciones" onClick={() => setOpen(false)}>×</button></div></div>{activeAlerts.length ? activeAlerts.map(alert => <div className="notification-item" key={alert.id}><button className="notification-item-main" aria-label={`Revisar alerta: ${alert.title}`} onClick={() => { navigate(alert.page); setOpen(false); }}><span className={`notification-severity ${alert.severity}`}>{alert.severity === 'critical' ? '!' : alert.severity === 'warning' ? '△' : 'i'}</span><span><strong>{alert.title}</strong><small>{alert.message}</small><em>Revisar →</em></span></button><button className="notification-dismiss" aria-label={`Descartar alerta: ${alert.title}`} title="Descartar alerta" onClick={() => dismiss(alert.id)}>×</button></div>) : <p className="notification-empty">No hay alertas que requieran atención.</p>}{criticalCount > 0 && <small className="notification-footnote">Priorizadas por urgencia</small>}</div>}</div>;
+  useEffect(() => {
+    if (open && unreadAlerts.length)
+      setReadIds((previous) => new Set([...previous, ...unreadAlerts.map((alert) => alert.id)]));
+  }, [open, unreadAlerts.length]);
+  const dismiss = (id: string) => setDismissedIds((previous) => new Set([...previous, id]));
+  const dismissAll = () =>
+    setDismissedIds((previous) => new Set([...previous, ...activeAlerts.map((alert) => alert.id)]));
+  return (
+    <div className="notification-center">
+      <button
+        className={`notification-button ${unreadAlerts.length ? 'has-alerts' : ''}`}
+        aria-label={`Abrir notificaciones${unreadAlerts.length ? `, ${unreadAlerts.length} sin leer` : ''}`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        ♢{unreadAlerts.length > 0 && <i>{unreadAlerts.length > 9 ? '9+' : unreadAlerts.length}</i>}
+      </button>
+      {open && (
+        <div className="notification-popover" role="dialog" aria-label="Centro de alertas">
+          <div className="notification-heading">
+            <div>
+              <strong>Centro de alertas</strong>
+              <span>
+                {activeAlerts.length ? `${activeAlerts.length} alertas` : 'Todo en orden'}
+              </span>
+            </div>
+            <div className="notification-heading-actions">
+              {activeAlerts.length > 0 && (
+                <button
+                  className="clear-all-button"
+                  aria-label="Descartar todas las alertas"
+                  onClick={dismissAll}
+                >
+                  Limpiar todo
+                </button>
+              )}
+              <button aria-label="Cerrar notificaciones" onClick={() => setOpen(false)}>
+                ×
+              </button>
+            </div>
+          </div>
+          {activeAlerts.length ? (
+            activeAlerts.map((alert) => (
+              <div className="notification-item" key={alert.id}>
+                <button
+                  className="notification-item-main"
+                  aria-label={`Revisar alerta: ${alert.title}`}
+                  onClick={() => {
+                    navigate(alert.page);
+                    setOpen(false);
+                  }}
+                >
+                  <span className={`notification-severity ${alert.severity}`}>
+                    {alert.severity === 'critical' ? '!' : alert.severity === 'warning' ? '△' : 'i'}
+                  </span>
+                  <span>
+                    <strong>{alert.title}</strong>
+                    <small>{alert.message}</small>
+                    <em>Revisar →</em>
+                  </span>
+                </button>
+                <button
+                  className="notification-dismiss"
+                  aria-label={`Descartar alerta: ${alert.title}`}
+                  title="Descartar alerta"
+                  onClick={() => dismiss(alert.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))
+          ) : (
+            <p className="notification-empty">No hay alertas que requieran atención.</p>
+          )}
+          {criticalCount > 0 && (
+            <small className="notification-footnote">Priorizadas por urgencia</small>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
-function ProfileMenu({ email, navigate, onLogout }: { email: string; navigate: (page: Page) => void; onLogout: () => void }) {
+function ProfileMenu({
+  email,
+  navigate,
+  onLogout,
+}: {
+  email: string;
+  navigate: (page: Page) => void;
+  onLogout: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  return <div className="profile-menu"><button className="avatar" aria-label="Abrir menú de perfil" aria-expanded={open} onClick={() => setOpen(value => !value)}>JG</button>{open && <div className="profile-popover" role="menu"><strong>Administrador</strong><span>{email}</span><small>Pollo &amp; Caja · Operación local</small><button role="menuitem" onClick={() => { navigate('settings'); setOpen(false); }}>⚙ Configuración</button><button role="menuitem" className="logout-action" onClick={onLogout}>↪ Cerrar sesión</button></div>}</div>;
+  return (
+    <div className="profile-menu">
+      <button
+        className="avatar"
+        aria-label="Abrir menú de perfil"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        JG
+      </button>
+      {open && (
+        <div className="profile-popover" role="menu">
+          <strong>Administrador</strong>
+          <span>{email}</span>
+          <small>Pollo &amp; Caja · Operación local</small>
+          <button
+            role="menuitem"
+            onClick={() => {
+              navigate('settings');
+              setOpen(false);
+            }}
+          >
+            ⚙ Configuración
+          </button>
+          <button role="menuitem" className="logout-action" onClick={onLogout}>
+            ↪ Cerrar sesión
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
-function Sidebar({page,navigate}:{page:Page;navigate:(p:Page)=>void}) { const item = (p:Page, icon:string, label:string) => <button className={`nav-item ${page === p ? 'active' : ''}`} onClick={() => navigate(p)}><span>{icon}</span>{label}</button>; return <aside className="sidebar"><div className="brand"><div className="brand-mark">P</div><div><strong>Pollo &amp; Caja</strong><span>Gestión de ventas</span></div></div><nav><p className="nav-label">MENÚ PRINCIPAL</p>{item('dashboard','⌂','Dashboard')}{item('products','▣','Productos')}{item('checkout','▤','Nueva venta')}{item('history','◷','Historial de ventas')}<button className={`nav-item ${page === 'expenses' ? 'active' : ''}`} onClick={() => navigate('expenses')}><span>↗</span>Gastos</button><p className="nav-label section-label">IA / ASISTENTE</p>{item('ai','✦','Asistente IA')}<p className="nav-label section-label">ADMINISTRACIÓN</p><button className={`nav-item ${page === 'cash' ? 'active' : ''}`} onClick={() => navigate('cash')}><span>▥</span>Caja</button><button className={`nav-item ${page === 'reports' ? 'active' : ''}`} onClick={() => navigate('reports')}><span>▤</span>Reportes</button><button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')}><span>⚙</span>Configuración</button></nav><div className="sidebar-footer"><div className="status-dot" /><span>Caja abierta</span><b>Operación local</b><small>Servicio activo</small></div></aside> }
-function Dashboard({summary,sales,navigate}:{summary:any;sales:Sale[];navigate:(p:Page)=>void}) { const [range,setRange]=useState(defaultRange); const [analytics,setAnalytics]=useState<any>(null); useEffect(()=>{window.salesApi.sales.analytics(range).then(setAnalytics)},[range.from,range.to]); const total = analytics?.totalCents ?? summary?.salesTodayCents ?? 0; const max = Math.max(...(analytics?.byDay?.map((d:any)=>d.total_cents) ?? [1])); return <><div className="analytics-toolbar"><div><strong>Rendimiento</strong><span>Visualizá el negocio por período</span></div><label>Desde<input type="date" value={range.from} onChange={e=>setRange({...range,from:e.target.value})}/></label><label>Hasta<input type="date" value={range.to} onChange={e=>setRange({...range,to:e.target.value})}/></label><button className="secondary-button" onClick={()=>setRange(defaultRange())}>Últimos 7 días</button></div><section className="stats-grid"><StatCard label="Ventas del período" value={money(total)} change="Filtrado" icon="◉" tone="orange"/><StatCard label="Pedidos" value={String(analytics?.orders ?? 0)} change="Filtrado" icon="▤" tone="purple"/><StatCard label="Ticket promedio" value={money(analytics?.orders ? total / analytics.orders : 0)} change="Del período" icon="⌁" tone="green"/><StatCard label="Ganancia bruta" value={money(analytics?.grossProfitCents ?? 0)} change={`${(analytics?.marginPercent ?? 0).toFixed(1)}% margen`} icon="↗" tone="green"/><StatCard label="Gastos del día" value={money(summary?.expensesTodayCents ?? 0)} change="Hoy" icon="↗" tone="red"/></section><div className="content-grid"><section className="panel sales-panel"><div className="panel-heading"><div><h2>Ventas recientes</h2><p>Últimas transacciones registradas</p></div><button className="text-button" onClick={() => navigate('history')}>Ver todas →</button></div><SalesTable sales={sales.slice(0,5)} /></section><section className="panel quick-panel"><div className="panel-heading"><div><h2>Acciones rápidas</h2><p>Lo que más usás</p></div></div><button className="quick-action primary" onClick={() => navigate('checkout')}><span className="action-icon">＋</span><div><strong>Nueva venta</strong><small>Registrar una venta</small></div><span>→</span></button><button className="quick-action" onClick={() => navigate('products')}><span className="action-icon purple-icon">▣</span><div><strong>Agregar producto</strong><small>Actualizar catálogo</small></div><span>→</span></button></section></div><section className="bottom-grid"><div className="panel chart-panel"><div className="panel-heading"><div><h2>Resumen de ventas</h2><p>Las ventas aparecerán aquí al registrar operaciones.</p></div></div><div className="sales-bars">{(analytics?.byDay ?? []).map((day:any)=><div className="bar-column" key={day.day}><span>{money(day.total_cents)}</span><i style={{height:`${Math.max(8, day.total_cents / max * 145)}px`}}/><small>{new Date(`${day.day}T12:00:00`).toLocaleDateString('es-AR',{weekday:'short'}).replace('.','')}</small></div>)}</div></div><div className="panel stock-panel"><div className="panel-heading"><div><h2>Stock bajo</h2><p>Productos que necesitan atención</p></div><button className="text-button" onClick={() => navigate('products')}>Ver productos →</button></div>{(summary?.lowStock ?? []).slice(0,4).map((p:Product) => <div className="stock-item" key={p.id}><div className="product-thumb">{p.image_path ? <img src={p.image_path} /> : '🍗'}</div><div className="stock-info"><strong>{p.name}</strong><span>Quedan {p.stock} unidades</span></div><div className="stock-bar"><i style={{width:`${Math.min(p.stock * 10,100)}%`}} /></div></div>)}{!summary?.lowStock?.length && <p className="muted">No hay productos con stock bajo.</p>}</div></section></> }
-function StatCard({label,value,change,icon,tone}:{label:string;value:string;change:string;icon:string;tone:string}) { return <div className="stat-card"><div className={`stat-icon ${tone}`}>{icon}</div><div className="stat-copy"><span>{label}</span><strong>{value}</strong><small>{change}</small></div><span className="card-menu">•••</span></div> }
-function SalesTable({sales,onSelect}:{sales:Sale[];onSelect?:(sale:Sale)=>void}) { if (!sales.length) return <div className="empty-state"><strong>No hay ventas en este período.</strong><span>Probá cambiar las fechas o el medio de pago.</span></div>; return <div className="sales-table"><div className="table-row table-head"><span>VENTA</span><span>DETALLE</span><span>TOTAL</span><span>PAGO</span><span>VER</span></div>{sales.map(s => <button className="table-row sale-row" key={s.id} onClick={()=>onSelect?.(s)}><span className="sale-id">#{String(s.id).padStart(4,'0')}</span><span className="muted">{s.items.map(i => `${i.quantity} ${i.product_name}`).join(', ')}</span><span className="total">{money(s.total_cents)}</span><span><b className={`pill ${s.payment_method === 'cash' ? 'green' : 'blue'}`}>{s.payment_method === 'cash' ? 'Efectivo' : 'Tarjeta'}</b></span><span className="detail-link">Ver detalle →</span></button>)}</div> }
-function Products({products,refresh,navigate}:{products:Product[];refresh:()=>Promise<void>;navigate:(p:Page)=>void}) { const [editing,setEditing]=useState<Product|null>(null); const [show,setShow]=useState(false); const [adjusting,setAdjusting]=useState<Product|null>(null); const [historyProduct,setHistoryProduct]=useState<number|undefined>(); return <><div className="page-actions"><div><h2>Catálogo de productos</h2><p className="subtitle">Administrá precios, imágenes y stock.</p></div><button className="primary-button" onClick={() => {setEditing(null);setShow(true)}}>＋ Nuevo producto</button></div><div className="product-grid">{products.map(p => <article className="product-card" key={p.id}><div className="product-image">{p.image_path ? <img src={p.image_path} /> : <span>🍗</span>}</div><div className="product-card-body"><div><h3>{p.name}</h3><p>{p.description || 'Sin descripción'}</p></div><strong>{money(p.price_cents)}</strong><small>Costo: {money(p.cost_cents)} · Margen estimado: {money(p.price_cents - p.cost_cents)} ({p.price_cents ? ((p.price_cents - p.cost_cents) / p.price_cents * 100).toFixed(1) : '0.0'}%)</small><div className="product-meta"><span className={p.stock <= 10 ? 'low-stock' : ''}>{p.stock} en stock</span><div className="product-actions" aria-label={`Acciones para ${p.name}`}><button className="link-button product-action-adjust" title={`Ajustar stock de ${p.name}`} aria-label={`Ajustar stock de ${p.name}`} onClick={() => setAdjusting(p)}>Ajustar</button><button className="link-button product-action-history" title={`Ver movimientos de ${p.name}`} aria-label={`Ver movimientos de ${p.name}`} onClick={() => {setHistoryProduct(p.id)}}>Movimientos</button><button className="link-button product-action-edit" title={`Editar ${p.name}`} aria-label={`Editar ${p.name}`} onClick={() => {setEditing(p);setShow(true)}}>Editar</button></div></div></div></article>)}{!products.length && <div className="empty-state">No hay productos. Creá el primero para comenzar.</div>}</div>{show && <ProductModal product={editing} close={() => setShow(false)} saved={async()=>{await refresh();setShow(false)}} />}{adjusting && <StockAdjustModal product={adjusting} close={()=>setAdjusting(null)} saved={async()=>{setAdjusting(null);await refresh()}} />}{historyProduct !== undefined && <MovementHistory productId={historyProduct} products={products} close={()=>setHistoryProduct(undefined)} />}</> }
-function StockAdjustModal({product,close,saved}:{product:Product;close:()=>void;saved:()=>Promise<void>}) { const [delta,setDelta]=useState(''); const [reason,setReason]=useState(''); const [error,setError]=useState(''); const submit=async(e:React.FormEvent)=>{e.preventDefault();try{await window.salesApi.products.adjustStock({productId:product.id,quantityDelta:Number(delta),reason});await saved()}catch(error){setError(error instanceof Error?error.message:'No se pudo ajustar el stock.')}}; return <div className="modal-backdrop"><form className="modal" onSubmit={submit}><div className="modal-heading"><h2>Ajustar stock · {product.name}</h2><button type="button" onClick={close}>×</button></div><p>Stock actual: <strong>{product.stock}</strong></p><label>Cantidad (positiva entra, negativa sale)<input required type="number" step="1" value={delta} onChange={e=>setDelta(e.target.value)} /></label><label>Motivo<input required maxLength={200} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Ej. Conteo físico" /></label>{error&&<p className="form-error">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={close}>Cancelar</button><button className="primary-button">Guardar ajuste</button></div></form></div> }
-function MovementHistory({productId,products,close}:{productId?:number;products:Product[];close:()=>void}) { const [rows,setRows]=useState<any[]>([]); const [type,setType]=useState('all'); useEffect(()=>{window.salesApi.products.movements(productId,200,{type}).then(setRows)},[productId,type]); return <div className="modal-backdrop"><div className="modal"><div className="modal-heading"><div><h2>Historial de stock</h2><p>Movimientos auditables con motivo y saldo.</p></div><button onClick={close}>×</button></div><label>Tipo<select value={type} onChange={e=>setType(e.target.value)}><option value="all">Todos</option><option value="sale">Ventas</option><option value="entry">Entradas</option><option value="adjustment">Ajustes</option></select></label><div>{rows.map(row=><div className="expense-row" key={row.id}><div><strong>{row.product_name || products.find(p=>p.id===row.product_id)?.name}</strong><small>{row.type} · {row.reason} · {new Date(row.created_at).toLocaleString('es-AR')}</small></div><b className={row.quantity_delta>0?'cash-in':'cash-out'}>{row.quantity_delta>0?'+':''}{row.quantity_delta} ({row.stock_before} → {row.stock_after})</b></div>)}{!rows.length&&<div className="empty-state">No hay movimientos.</div>}</div><button className="secondary-button full-button" onClick={close}>Cerrar</button></div></div> }
-function ProductModal({product,close,saved}:{product:Product|null;close:()=>void;saved:()=>Promise<void>}) { const [name,setName]=useState(product?.name ?? ''); const [description,setDescription]=useState(product?.description ?? ''); const [price,setPrice]=useState(product ? String(product.price_cents/100) : ''); const [cost,setCost]=useState(product ? String(product.cost_cents/100) : ''); const [stock,setStock]=useState(product ? String(product.stock) : ''); const [image,setImage]=useState(product?.image_path ?? ''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false); const [archiveBusy,setArchiveBusy]=useState(false); const [deleteOpen,setDeleteOpen]=useState(false); const [imageBusy,setImageBusy]=useState(false); const dirty=Boolean(name.trim() || description.trim() || price || cost || stock || image) && (name !== (product?.name ?? '') || description !== (product?.description ?? '') || price !== (product ? String(product.price_cents/100) : '') || cost !== (product ? String(product.cost_cents/100) : '') || stock !== (product ? String(product.stock) : '') || image !== (product?.image_path ?? '')); const requestClose=()=>{if(busy||deleteOpen)return;if(dirty && !window.confirm('Hay cambios sin guardar. ¿Querés descartarlos?'))return;close()}; useEffect(()=>{if(deleteOpen)return;const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape')requestClose()};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)},[dirty,busy,deleteOpen]); const submit=async(e:React.FormEvent)=>{e.preventDefault();setError('');const normalizedName=name.trim();const priceValue=Number(price);const costValue=Number(cost);const stockValue=Number(stock);if(!normalizedName)return setError('Ingresá un nombre para el producto.');if(normalizedName.length>120)return setError('El nombre puede tener hasta 120 caracteres.');if(!Number.isFinite(priceValue)||priceValue<0||priceValue>21474836.47)return setError('Ingresá un precio válido.');if(!Number.isFinite(costValue)||costValue<0||costValue>21474836.47)return setError('Ingresá un costo válido.');if(!Number.isInteger(stockValue)||stockValue<0||stockValue>2147483647)return setError('Ingresá un stock entero válido.');const priceCents=Math.round(priceValue*100);const costCents=Math.round(costValue*100);if(!Number.isSafeInteger(priceCents)||!Number.isSafeInteger(costCents))return setError('Los importes son demasiado grandes.');setBusy(true);try{const input:ProductInput={id:product?.id,name:normalizedName,description:description.trim(),priceCents,costCents,stock:stockValue,imagePath:image||null};if(product)await window.salesApi.products.update({...input,id:product.id});else await window.salesApi.products.create(input);await saved()}catch(cause){setError(cause instanceof Error?cause.message:'No se pudo guardar el producto.');setBusy(false)}}; const archive=async()=>{if(!product||archiveBusy||busy)return;setArchiveBusy(true);setError('');try{await window.salesApi.products.archive({id:product.id});await saved()}catch(cause){setError(cause instanceof Error?cause.message:'No se pudo eliminar el producto.');setArchiveBusy(false)}}; const chooseImage=(file:File|undefined)=>{if(!file)return;if(!file.type.startsWith('image/'))return setError('Elegí un archivo de imagen.');if(file.size>5*1024*1024)return setError('La imagen no puede superar 5 MB.');setError('');setImageBusy(true);const reader=new FileReader();reader.onload=()=>{setImage(String(reader.result));setImageBusy(false)};reader.onerror=()=>{setError('No se pudo leer la imagen.');setImageBusy(false)};reader.readAsDataURL(file)}; return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)requestClose()}}><form className="modal product-modal" role="dialog" aria-modal="true" aria-labelledby="product-modal-title" onSubmit={submit}><div className="modal-heading"><h2 id="product-modal-title">{product ? 'Editar producto' : 'Nuevo producto'}</h2><button type="button" aria-label="Cerrar formulario" onClick={requestClose}>×</button></div><label>Nombre<input autoFocus required maxLength={120} value={name} onChange={e=>setName(e.target.value)} /></label><label>Descripción<textarea maxLength={500} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Descripción opcional" /></label><div className="form-row"><label>Precio de venta<input required type="number" min="0" max="21474836.47" step="0.01" inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} /></label><label>Costo<input required type="number" min="0" max="21474836.47" step="0.01" inputMode="decimal" value={cost} onChange={e=>setCost(e.target.value)} /></label><label>Stock<input required type="number" min="0" max="2147483647" step="1" inputMode="numeric" value={stock} onChange={e=>setStock(e.target.value)} /></label></div><label>Imagen del producto<input type="file" accept="image/*" onChange={e=>chooseImage(e.target.files?.[0])} />{imageBusy && <small className="field-hint">Procesando imagen…</small>}</label>{image && <div className="image-preview-wrap"><img className="image-preview" src={image} alt="Vista previa del producto" /><button type="button" className="link-button" onClick={()=>setImage('')}>Quitar imagen</button></div>}{error&&<p className="form-error" role="alert">{error}</p>}<div className="modal-actions">{product&&<button type="button" className="archive-button" disabled={busy||archiveBusy||imageBusy} onClick={()=>setDeleteOpen(true)}>{'Eliminar producto'}</button>}<button type="button" className="secondary-button" disabled={busy||archiveBusy} onClick={requestClose}>Cancelar</button><button className="primary-button" disabled={busy||archiveBusy||imageBusy}>{busy?'Guardando…':'Guardar producto'}</button></div>{deleteOpen && product && <ProductDeleteModal product={product} busy={archiveBusy} error={error} close={()=>{if(!archiveBusy)setDeleteOpen(false)}} onDelete={archive} />}</form></div> }
-function ProductDeleteModal({product,busy,error,close,onDelete}:{product:Product;busy:boolean;error:string;close:()=>void;onDelete:()=>Promise<void>}) { useEffect(()=>{const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();if(!busy)close()}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)},[busy,close]); return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)close()}}><div className="modal delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-product-title" aria-describedby="delete-product-description"><div className="modal-heading"><h2 id="delete-product-title">Eliminar producto</h2><button type="button" aria-label="Cerrar confirmación" disabled={busy} onClick={close}>×</button></div><p id="delete-product-description">¿Querés eliminar <strong>“{product.name}”</strong>?</p><p className="delete-explanation">Se quitará del catálogo activo y del checkout. Las ventas y el historial de inventario se conservarán.</p>{error&&<p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={close}>Cancelar</button><button type="button" className="destructive-button" disabled={busy} onClick={()=>void onDelete()}>{busy?'Eliminando…':'Eliminar producto'}</button></div></div></div> }
+function Sidebar({ page, navigate }: { page: Page; navigate: (p: Page) => void }) {
+  const item = (p: Page, icon: string, label: string) => (
+    <button className={`nav-item ${page === p ? 'active' : ''}`} onClick={() => navigate(p)}>
+      <span>{icon}</span>
+      {label}
+    </button>
+  );
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark">P</div>
+        <div>
+          <strong>Pollo &amp; Caja</strong>
+          <span>Gestión de ventas</span>
+        </div>
+      </div>
+      <nav>
+        <p className="nav-label">MENÚ PRINCIPAL</p>
+        {item('dashboard', '⌂', 'Dashboard')}
+        {item('products', '▣', 'Productos')}
+        {item('checkout', '▤', 'Nueva venta')}
+        {item('history', '◷', 'Historial de ventas')}
+        <button
+          className={`nav-item ${page === 'expenses' ? 'active' : ''}`}
+          onClick={() => navigate('expenses')}
+        >
+          <span>↗</span>Gastos
+        </button>
+        <p className="nav-label section-label">IA / ASISTENTE</p>
+        {item('ai', '✦', 'Asistente IA')}
+        <p className="nav-label section-label">ADMINISTRACIÓN</p>
+        <button
+          className={`nav-item ${page === 'cash' ? 'active' : ''}`}
+          onClick={() => navigate('cash')}
+        >
+          <span>▥</span>Caja
+        </button>
+        <button
+          className={`nav-item ${page === 'reports' ? 'active' : ''}`}
+          onClick={() => navigate('reports')}
+        >
+          <span>▤</span>Reportes
+        </button>
+        <button
+          className={`nav-item ${page === 'settings' ? 'active' : ''}`}
+          onClick={() => navigate('settings')}
+        >
+          <span>⚙</span>Configuración
+        </button>
+      </nav>
+      <div className="sidebar-footer">
+        <div className="status-dot" />
+        <span>Caja abierta</span>
+        <b>Operación local</b>
+        <small>Servicio activo</small>
+      </div>
+    </aside>
+  );
+}
+function Dashboard({
+  summary,
+  sales,
+  navigate,
+}: {
+  summary: any;
+  sales: Sale[];
+  navigate: (p: Page) => void;
+}) {
+  const [range, setRange] = useState(defaultRange);
+  const [analytics, setAnalytics] = useState<any>(null);
+  useEffect(() => {
+    window.salesApi.sales.analytics(range).then(setAnalytics);
+  }, [range.from, range.to]);
+  const total = analytics?.totalCents ?? summary?.salesTodayCents ?? 0;
+  const max = Math.max(...(analytics?.byDay?.map((d: any) => d.total_cents) ?? [1]));
+  return (
+    <>
+      <div className="analytics-toolbar">
+        <div>
+          <strong>Rendimiento</strong>
+          <span>Visualizá el negocio por período</span>
+        </div>
+        <label>
+          Desde
+          <input
+            type="date"
+            value={range.from}
+            onChange={(e) => setRange({ ...range, from: e.target.value })}
+          />
+        </label>
+        <label>
+          Hasta
+          <input
+            type="date"
+            value={range.to}
+            onChange={(e) => setRange({ ...range, to: e.target.value })}
+          />
+        </label>
+        <button className="secondary-button" onClick={() => setRange(defaultRange())}>
+          Últimos 7 días
+        </button>
+      </div>
+      <section className="stats-grid">
+        <StatCard
+          label="Ventas del período"
+          value={money(total)}
+          change="Filtrado"
+          icon="◉"
+          tone="orange"
+        />
+        <StatCard
+          label="Pedidos"
+          value={String(analytics?.orders ?? 0)}
+          change="Filtrado"
+          icon="▤"
+          tone="purple"
+        />
+        <StatCard
+          label="Ticket promedio"
+          value={money(analytics?.orders ? total / analytics.orders : 0)}
+          change="Del período"
+          icon="⌁"
+          tone="green"
+        />
+        <StatCard
+          label="Ganancia bruta"
+          value={money(analytics?.grossProfitCents ?? 0)}
+          change={`${(analytics?.marginPercent ?? 0).toFixed(1)}% margen`}
+          icon="↗"
+          tone="green"
+        />
+        <StatCard
+          label="Gastos del día"
+          value={money(summary?.expensesTodayCents ?? 0)}
+          change="Hoy"
+          icon="↗"
+          tone="red"
+        />
+      </section>
+      <div className="content-grid">
+        <section className="panel sales-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Ventas recientes</h2>
+              <p>Últimas transacciones registradas</p>
+            </div>
+            <button className="text-button" onClick={() => navigate('history')}>
+              Ver todas →
+            </button>
+          </div>
+          <SalesTable sales={sales.slice(0, 5)} />
+        </section>
+        <section className="panel quick-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Acciones rápidas</h2>
+              <p>Lo que más usás</p>
+            </div>
+          </div>
+          <button className="quick-action primary" onClick={() => navigate('checkout')}>
+            <span className="action-icon">＋</span>
+            <div>
+              <strong>Nueva venta</strong>
+              <small>Registrar una venta</small>
+            </div>
+            <span>→</span>
+          </button>
+          <button className="quick-action" onClick={() => navigate('products')}>
+            <span className="action-icon purple-icon">▣</span>
+            <div>
+              <strong>Agregar producto</strong>
+              <small>Actualizar catálogo</small>
+            </div>
+            <span>→</span>
+          </button>
+        </section>
+      </div>
+      <section className="bottom-grid">
+        <div className="panel chart-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Resumen de ventas</h2>
+              <p>Las ventas aparecerán aquí al registrar operaciones.</p>
+            </div>
+          </div>
+          <div className="sales-bars">
+            {(analytics?.byDay ?? []).map((day: any) => (
+              <div className="bar-column" key={day.day}>
+                <span>{money(day.total_cents)}</span>
+                <i style={{ height: `${Math.max(8, (day.total_cents / max) * 145)}px` }} />
+                <small>
+                  {new Date(`${day.day}T12:00:00`)
+                    .toLocaleDateString('es-AR', { weekday: 'short' })
+                    .replace('.', '')}
+                </small>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="panel stock-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Stock bajo</h2>
+              <p>Productos que necesitan atención</p>
+            </div>
+            <button className="text-button" onClick={() => navigate('products')}>
+              Ver productos →
+            </button>
+          </div>
+          {(summary?.lowStock ?? []).slice(0, 4).map((p: Product) => (
+            <div className="stock-item" key={p.id}>
+              <div className="product-thumb">
+                {p.image_path ? <img src={p.image_path} /> : '🍗'}
+              </div>
+              <div className="stock-info">
+                <strong>{p.name}</strong>
+                <span>Quedan {p.stock} unidades</span>
+              </div>
+              <div className="stock-bar">
+                <i style={{ width: `${Math.min(p.stock * 10, 100)}%` }} />
+              </div>
+            </div>
+          ))}
+          {!summary?.lowStock?.length && <p className="muted">No hay productos con stock bajo.</p>}
+        </div>
+      </section>
+    </>
+  );
+}
+function StatCard({
+  label,
+  value,
+  change,
+  icon,
+  tone,
+}: {
+  label: string;
+  value: string;
+  change: string;
+  icon: string;
+  tone: string;
+}) {
+  return (
+    <div className="stat-card">
+      <div className={`stat-icon ${tone}`}>{icon}</div>
+      <div className="stat-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{change}</small>
+      </div>
+      <span className="card-menu">•••</span>
+    </div>
+  );
+}
+function SalesTable({ sales, onSelect }: { sales: Sale[]; onSelect?: (sale: Sale) => void }) {
+  if (!sales.length)
+    return (
+      <div className="empty-state">
+        <strong>No hay ventas en este período.</strong>
+        <span>Probá cambiar las fechas o el medio de pago.</span>
+      </div>
+    );
+  return (
+    <div className="sales-table">
+      <div className="table-row table-head">
+        <span>VENTA</span>
+        <span>DETALLE</span>
+        <span>TOTAL</span>
+        <span>PAGO</span>
+        <span>VER</span>
+      </div>
+      {sales.map((s) => (
+        <button className="table-row sale-row" key={s.id} onClick={() => onSelect?.(s)}>
+          <span className="sale-id">#{String(s.id).padStart(4, '0')}</span>
+          <span className="muted">
+            {s.items.map((i) => `${i.quantity} ${i.product_name}`).join(', ')}
+          </span>
+          <span className="total">{money(s.total_cents)}</span>
+          <span>
+            <b className={`pill ${s.payment_method === 'cash' ? 'green' : 'blue'}`}>
+              {s.payment_method === 'cash' ? 'Efectivo' : 'Tarjeta'}
+            </b>
+          </span>
+          <span className="detail-link">Ver detalle →</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+function Products({
+  products,
+  refresh,
+  navigate,
+}: {
+  products: Product[];
+  refresh: () => Promise<void>;
+  navigate: (p: Page) => void;
+}) {
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [show, setShow] = useState(false);
+  const [adjusting, setAdjusting] = useState<Product | null>(null);
+  const [historyProduct, setHistoryProduct] = useState<number | undefined>();
+  return (
+    <>
+      <div className="page-actions">
+        <div>
+          <h2>Catálogo de productos</h2>
+          <p className="subtitle">Administrá precios, imágenes y stock.</p>
+        </div>
+        <button
+          className="primary-button"
+          onClick={() => {
+            setEditing(null);
+            setShow(true);
+          }}
+        >
+          ＋ Nuevo producto
+        </button>
+      </div>
+      <div className="product-grid">
+        {products.map((p) => (
+          <article className="product-card" key={p.id}>
+            <div className="product-image">
+              {p.image_path ? <img src={p.image_path} /> : <span>🍗</span>}
+            </div>
+            <div className="product-card-body">
+              <div>
+                <h3>{p.name}</h3>
+                <p>{p.description || 'Sin descripción'}</p>
+              </div>
+              <strong>{money(p.price_cents)}</strong>
+              <small>
+                Costo: {money(p.cost_cents)} · Margen estimado:{' '}
+                {money(p.price_cents - p.cost_cents)} (
+                {p.price_cents
+                  ? (((p.price_cents - p.cost_cents) / p.price_cents) * 100).toFixed(1)
+                  : '0.0'}
+                %)
+              </small>
+              <div className="product-meta">
+                <span className={p.stock <= 10 ? 'low-stock' : ''}>{p.stock} en stock</span>
+                <div className="product-actions" aria-label={`Acciones para ${p.name}`}>
+                  <button
+                    className="link-button product-action-adjust"
+                    title={`Ajustar stock de ${p.name}`}
+                    aria-label={`Ajustar stock de ${p.name}`}
+                    onClick={() => setAdjusting(p)}
+                  >
+                    Ajustar
+                  </button>
+                  <button
+                    className="link-button product-action-history"
+                    title={`Ver movimientos de ${p.name}`}
+                    aria-label={`Ver movimientos de ${p.name}`}
+                    onClick={() => {
+                      setHistoryProduct(p.id);
+                    }}
+                  >
+                    Movimientos
+                  </button>
+                  <button
+                    className="link-button product-action-edit"
+                    title={`Editar ${p.name}`}
+                    aria-label={`Editar ${p.name}`}
+                    onClick={() => {
+                      setEditing(p);
+                      setShow(true);
+                    }}
+                  >
+                    Editar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+        {!products.length && (
+          <div className="empty-state">No hay productos. Creá el primero para comenzar.</div>
+        )}
+      </div>
+      {show && (
+        <ProductModal
+          product={editing}
+          close={() => setShow(false)}
+          saved={async () => {
+            await refresh();
+            setShow(false);
+          }}
+        />
+      )}
+      {adjusting && (
+        <StockAdjustModal
+          product={adjusting}
+          close={() => setAdjusting(null)}
+          saved={async () => {
+            setAdjusting(null);
+            await refresh();
+          }}
+        />
+      )}
+      {historyProduct !== undefined && (
+        <MovementHistory
+          productId={historyProduct}
+          products={products}
+          close={() => setHistoryProduct(undefined)}
+        />
+      )}
+    </>
+  );
+}
+function StockAdjustModal({
+  product,
+  close,
+  saved,
+}: {
+  product: Product;
+  close: () => void;
+  saved: () => Promise<void>;
+}) {
+  const [delta, setDelta] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await window.salesApi.products.adjustStock({
+        productId: product.id,
+        quantityDelta: Number(delta),
+        reason,
+      });
+      await saved();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo ajustar el stock.');
+    }
+  };
+  return (
+    <div className="modal-backdrop">
+      <form className="modal" onSubmit={submit}>
+        <div className="modal-heading">
+          <h2>Ajustar stock · {product.name}</h2>
+          <button type="button" onClick={close}>
+            ×
+          </button>
+        </div>
+        <p>
+          Stock actual: <strong>{product.stock}</strong>
+        </p>
+        <label>
+          Cantidad (positiva entra, negativa sale)
+          <input
+            required
+            type="number"
+            step="1"
+            value={delta}
+            onChange={(e) => setDelta(e.target.value)}
+          />
+        </label>
+        <label>
+          Motivo
+          <input
+            required
+            maxLength={200}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ej. Conteo físico"
+          />
+        </label>
+        {error && <p className="form-error">{error}</p>}
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={close}>
+            Cancelar
+          </button>
+          <button className="primary-button">Guardar ajuste</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+function MovementHistory({
+  productId,
+  products,
+  close,
+}: {
+  productId?: number;
+  products: Product[];
+  close: () => void;
+}) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [type, setType] = useState('all');
+  useEffect(() => {
+    window.salesApi.products.movements(productId, 200, { type }).then(setRows);
+  }, [productId, type]);
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="modal-heading">
+          <div>
+            <h2>Historial de stock</h2>
+            <p>Movimientos auditables con motivo y saldo.</p>
+          </div>
+          <button onClick={close}>×</button>
+        </div>
+        <label>
+          Tipo
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="all">Todos</option>
+            <option value="sale">Ventas</option>
+            <option value="entry">Entradas</option>
+            <option value="adjustment">Ajustes</option>
+          </select>
+        </label>
+        <div>
+          {rows.map((row) => (
+            <div className="expense-row" key={row.id}>
+              <div>
+                <strong>
+                  {row.product_name || products.find((p) => p.id === row.product_id)?.name}
+                </strong>
+                <small>
+                  {row.type} · {row.reason} · {new Date(row.created_at).toLocaleString('es-AR')}
+                </small>
+              </div>
+              <b className={row.quantity_delta > 0 ? 'cash-in' : 'cash-out'}>
+                {row.quantity_delta > 0 ? '+' : ''}
+                {row.quantity_delta} ({row.stock_before} → {row.stock_after})
+              </b>
+            </div>
+          ))}
+          {!rows.length && <div className="empty-state">No hay movimientos.</div>}
+        </div>
+        <button className="secondary-button full-button" onClick={close}>
+          Cerrar
+        </button>
+      </div>
+    </div>
+  );
+}
+function ProductModal({
+  product,
+  close,
+  saved,
+}: {
+  product: Product | null;
+  close: () => void;
+  saved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(product?.name ?? '');
+  const [description, setDescription] = useState(product?.description ?? '');
+  const [price, setPrice] = useState(product ? String(product.price_cents / 100) : '');
+  const [cost, setCost] = useState(product ? String(product.cost_cents / 100) : '');
+  const [stock, setStock] = useState(product ? String(product.stock) : '');
+  const [image, setImage] = useState(product?.image_path ?? '');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
+  const dirty =
+    Boolean(name.trim() || description.trim() || price || cost || stock || image) &&
+    (name !== (product?.name ?? '') ||
+      description !== (product?.description ?? '') ||
+      price !== (product ? String(product.price_cents / 100) : '') ||
+      cost !== (product ? String(product.cost_cents / 100) : '') ||
+      stock !== (product ? String(product.stock) : '') ||
+      image !== (product?.image_path ?? ''));
+  const requestClose = () => {
+    if (busy || deleteOpen) return;
+    if (dirty && !window.confirm('Hay cambios sin guardar. ¿Querés descartarlos?')) return;
+    close();
+  };
+  useEffect(() => {
+    if (deleteOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') requestClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dirty, busy, deleteOpen]);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const normalizedName = name.trim();
+    const priceValue = Number(price);
+    const costValue = Number(cost);
+    const stockValue = Number(stock);
+    if (!normalizedName) return setError('Ingresá un nombre para el producto.');
+    if (normalizedName.length > 120) return setError('El nombre puede tener hasta 120 caracteres.');
+    if (!Number.isFinite(priceValue) || priceValue < 0 || priceValue > 21474836.47)
+      return setError('Ingresá un precio válido.');
+    if (!Number.isFinite(costValue) || costValue < 0 || costValue > 21474836.47)
+      return setError('Ingresá un costo válido.');
+    if (!Number.isInteger(stockValue) || stockValue < 0 || stockValue > 2147483647)
+      return setError('Ingresá un stock entero válido.');
+    const priceCents = Math.round(priceValue * 100);
+    const costCents = Math.round(costValue * 100);
+    if (!Number.isSafeInteger(priceCents) || !Number.isSafeInteger(costCents))
+      return setError('Los importes son demasiado grandes.');
+    setBusy(true);
+    try {
+      const input: ProductInput = {
+        id: product?.id,
+        name: normalizedName,
+        description: description.trim(),
+        priceCents,
+        costCents,
+        stock: stockValue,
+        imagePath: image || null,
+      };
+      if (product) await window.salesApi.products.update({ ...input, id: product.id });
+      else await window.salesApi.products.create(input);
+      await saved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el producto.');
+      setBusy(false);
+    }
+  };
+  const archive = async () => {
+    if (!product || archiveBusy || busy) return;
+    setArchiveBusy(true);
+    setError('');
+    try {
+      await window.salesApi.products.archive({ id: product.id });
+      await saved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el producto.');
+      setArchiveBusy(false);
+    }
+  };
+  const chooseImage = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setError('Elegí un archivo de imagen.');
+    if (file.size > 5 * 1024 * 1024) return setError('La imagen no puede superar 5 MB.');
+    setError('');
+    setImageBusy(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImage(String(reader.result));
+      setImageBusy(false);
+    };
+    reader.onerror = () => {
+      setError('No se pudo leer la imagen.');
+      setImageBusy(false);
+    };
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) requestClose();
+      }}
+    >
+      <form
+        className="modal product-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="product-modal-title"
+        onSubmit={submit}
+      >
+        <div className="modal-heading">
+          <h2 id="product-modal-title">{product ? 'Editar producto' : 'Nuevo producto'}</h2>
+          <button type="button" aria-label="Cerrar formulario" onClick={requestClose}>
+            ×
+          </button>
+        </div>
+        <label>
+          Nombre
+          <input
+            autoFocus
+            required
+            maxLength={120}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <label>
+          Descripción
+          <textarea
+            maxLength={500}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Descripción opcional"
+          />
+        </label>
+        <div className="form-row">
+          <label>
+            Precio de venta
+            <input
+              required
+              type="number"
+              min="0"
+              max="21474836.47"
+              step="0.01"
+              inputMode="decimal"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </label>
+          <label>
+            Costo
+            <input
+              required
+              type="number"
+              min="0"
+              max="21474836.47"
+              step="0.01"
+              inputMode="decimal"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+            />
+          </label>
+          <label>
+            Stock
+            <input
+              required
+              type="number"
+              min="0"
+              max="2147483647"
+              step="1"
+              inputMode="numeric"
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+            />
+          </label>
+        </div>
+        <label>
+          Imagen del producto
+          <input type="file" accept="image/*" onChange={(e) => chooseImage(e.target.files?.[0])} />
+          {imageBusy && <small className="field-hint">Procesando imagen…</small>}
+        </label>
+        {image && (
+          <div className="image-preview-wrap">
+            <img className="image-preview" src={image} alt="Vista previa del producto" />
+            <button type="button" className="link-button" onClick={() => setImage('')}>
+              Quitar imagen
+            </button>
+          </div>
+        )}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          {product && (
+            <button
+              type="button"
+              className="archive-button"
+              disabled={busy || archiveBusy || imageBusy}
+              onClick={() => setDeleteOpen(true)}
+            >
+              {'Eliminar producto'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy || archiveBusy}
+            onClick={requestClose}
+          >
+            Cancelar
+          </button>
+          <button className="primary-button" disabled={busy || archiveBusy || imageBusy}>
+            {busy ? 'Guardando…' : 'Guardar producto'}
+          </button>
+        </div>
+        {deleteOpen && product && (
+          <ProductDeleteModal
+            product={product}
+            busy={archiveBusy}
+            error={error}
+            close={() => {
+              if (!archiveBusy) setDeleteOpen(false);
+            }}
+            onDelete={archive}
+          />
+        )}
+      </form>
+    </div>
+  );
+}
+function ProductDeleteModal({
+  product,
+  busy,
+  error,
+  close,
+  onDelete,
+}: {
+  product: Product;
+  busy: boolean;
+  error: string;
+  close: () => void;
+  onDelete: () => Promise<void>;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!busy) close();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, close]);
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) close();
+      }}
+    >
+      <div
+        className="modal delete-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-product-title"
+        aria-describedby="delete-product-description"
+      >
+        <div className="modal-heading">
+          <h2 id="delete-product-title">Eliminar producto</h2>
+          <button type="button" aria-label="Cerrar confirmación" disabled={busy} onClick={close}>
+            ×
+          </button>
+        </div>
+        <p id="delete-product-description">
+          ¿Querés eliminar <strong>“{product.name}”</strong>?
+        </p>
+        <p className="delete-explanation">
+          Se quitará del catálogo activo y del checkout. Las ventas y el historial de inventario se
+          conservarán.
+        </p>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" disabled={busy} onClick={close}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="destructive-button"
+            disabled={busy}
+            onClick={() => void onDelete()}
+          >
+            {busy ? 'Eliminando…' : 'Eliminar producto'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-function Checkout({products,onSaved}:{products:Product[];onSaved:()=>Promise<void>}) { const [cart,setCart]=useState<Record<number,number>>({}); const [payment,setPayment]=useState<'cash'|'card'>('cash'); const [received,setReceived]=useState(''); const [error,setError]=useState(''); const selected=products.filter(p=>cart[p.id]); const total=selected.reduce((sum,p)=>sum+p.price_cents*(cart[p.id]||0),0); const change=Math.max(0,Math.round(Number(received||0)*100)-total); const add=(p:Product,delta:number)=>setCart(c=>({...c,[p.id]:Math.max(0,Math.min(p.stock,(c[p.id]||0)+delta))})); const submit=async()=>{setError('');if(!selected.length)return setError('Agregá al menos un producto.');if(payment==='cash' && Number(received)*100<total)return setError('El efectivo recibido no alcanza para cubrir el total.');try{await window.salesApi.sales.create({totalCents:total,paymentMethod:payment,amountReceivedCents:payment==='cash'?Math.round(Number(received)*100):total,changeCents:payment==='cash'?change:0,items:selected.map(p=>({productId:p.id,productName:p.name,quantity:cart[p.id],unitPriceCents:p.price_cents,subtotalCents:p.price_cents*cart[p.id]}))});await onSaved()}catch(e){setError(e instanceof Error?e.message:'No se pudo guardar la venta.')}}; return <div className="checkout-layout"><section className="panel product-picker"><div className="panel-heading"><div><h2>Elegí los productos</h2><p>Hacé clic en agregar para sumarlos a la venta.</p></div></div><div className="picker-grid">{products.map(p=><button className="picker-card" key={p.id} disabled={!p.stock} onClick={()=>add(p,1)}><div className="product-thumb">{p.image_path?<img src={p.image_path}/>: '🍗'}</div><strong>{p.name}</strong><span>{money(p.price_cents)}</span><small>{p.stock} disponibles</small></button>)}</div></section><section className="panel cart-panel"><div className="panel-heading"><div><h2>Detalle de venta</h2><p>{selected.length} productos seleccionados</p></div></div>{selected.map(p=><div className="cart-row" key={p.id}><div><strong>{p.name}</strong><small>{money(p.price_cents)} c/u</small></div><div className="quantity"><button onClick={()=>add(p,-1)}>−</button><b>{cart[p.id]}</b><button onClick={()=>add(p,1)}>+</button></div><strong>{money(p.price_cents*cart[p.id])}</strong></div>)}{!selected.length&&<div className="empty-state">Seleccioná productos para comenzar.</div>}<div className="checkout-total"><span>Total</span><strong>{money(total)}</strong></div><div className="payment-tabs"><button className={payment==='cash'?'selected':''} onClick={()=>setPayment('cash')}>💵 Efectivo</button><button className={payment==='card'?'selected':''} onClick={()=>setPayment('card')}>💳 Tarjeta</button></div>{payment==='cash'&&<label className="cash-input">Efectivo recibido<input type="number" min="0" step="0.01" value={received} onChange={e=>setReceived(e.target.value)} placeholder="0,00" />{Number(received)>0&&<b className={change>=0?'change-ok':'change-error'}>{change>=0?`Vuelto: ${money(change)}`:'Falta dinero'}</b>}</label>}{error&&<p className="form-error">{error}</p>}<button className="primary-button full-button" disabled={!selected.length} onClick={submit}>Confirmar venta</button></section></div> }
-function Login({onLogin}:{onLogin:(email:string)=>void}) { const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false); const submit=async(e:React.FormEvent)=>{e.preventDefault();setError('');setBusy(true);try{if(await window.salesApi.auth.login({email,password}))onLogin(email);else setError('Correo o contraseña incorrectos.')}catch(error){setError(error instanceof Error?error.message:'No se pudo iniciar sesión.')}finally{setBusy(false)}}; return <div className="login-screen"><div className="login-card"><div className="login-logo">P</div><h1>Bienvenido</h1><p>Ingresá a Pollo &amp; Caja para continuar</p><form onSubmit={submit}><label>Correo electrónico<input type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="admin@gmail.com" /></label><label>Contraseña<input type="password" required minLength={8} value={password} onChange={e=>setPassword(e.target.value)} /></label>{error&&<div className="form-error">{error}</div>}<button className="primary-button full-button" disabled={busy}>{busy?'Ingresando…':'Ingresar al sistema'}</button></form></div></div> }
-function CashRegister({onChanged}:{onChanged:()=>Promise<void>}) { const [register,setRegister]=useState<any>(null); const [amount,setAmount]=useState(''); const [reason,setReason]=useState(''); const [message,setMessage]=useState(''); const load=async()=>setRegister(await window.salesApi.cash.get()); useEffect(()=>{load()},[]); const open=async(e:React.FormEvent)=>{e.preventDefault();try{await window.salesApi.cash.open(Math.round(Number(amount)*100));setAmount('');setMessage('Caja abierta correctamente.');await load();await onChanged()}catch(error){setMessage(error instanceof Error?error.message:'No se pudo abrir la caja.')}}; const close=async(e:React.FormEvent)=>{e.preventDefault();try{const result=await window.salesApi.cash.close(Math.round(Number(amount)*100));setMessage(`Caja cerrada. Diferencia: ${money(result.differenceCents)}`);setAmount('');await load();await onChanged()}catch(error){setMessage(error instanceof Error?error.message:'No se pudo cerrar la caja.')}}; const withdraw=async(e:React.FormEvent)=>{e.preventDefault();try{await window.salesApi.cash.withdraw({amountCents:Math.round(Number(amount)*100),reason});setAmount('');setReason('');setMessage('Retiro registrado correctamente.');await load();await onChanged()}catch(error){setMessage(error instanceof Error?error.message:'No se pudo registrar el retiro.')}}; const closed=register?.isClosed; return <div className="cash-page"><div className="cash-summary"><div className="panel cash-balance"><span>Saldo esperado de hoy</span><strong>{money(register?.balanceCents ?? 0)}</strong><b className={register?.isOpen?'cash-open':'cash-closed'}>{register?.isOpen?'● Caja abierta':closed?'● Caja cerrada':'● Caja sin abrir'}</b>{register?.opening&&<small>Apertura: {money(register.opening.amount_cents)} · {new Date(register.opening.created_at).toLocaleTimeString('es-AR')}</small>}{closed&&<><small>Contado: {money(register.countedCents ?? register.counted_cents)}</small><small>Diferencia: {money(register.differenceCents ?? register.difference_cents)}</small></>}</div><div className="panel cash-action"><h2>{register?.isOpen?'Cerrar caja':closed?'Caja cerrada':'Abrir caja'}</h2><p>{register?.isOpen?'Contá el efectivo disponible para comparar el saldo.':closed?'La jornada ya tiene un cierre registrado.':'Ingresá el efectivo inicial de la jornada.'}</p>{!closed&&<form onSubmit={register?.isOpen?close:open}><label>{register?.isOpen?'Efectivo contado':'Saldo inicial'}<input type="number" min="0" step="0.01" required value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0,00" /></label><button className="primary-button">{register?.isOpen?'Cerrar caja':'Abrir caja'}</button></form>}</div></div>{register?.isOpen&&<section className="panel expense-form"><div className="panel-heading"><div><h2>Retirar efectivo</h2><p>Registrá un retiro vinculado a la caja abierta.</p></div></div><form onSubmit={withdraw}><div className="form-row"><label>Monto<input type="number" min="0.01" step="0.01" required value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0,00" /></label><label>Motivo<input required maxLength={200} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Ej. Retiro del dueño" /></label></div><button className="primary-button">Registrar retiro</button></form></section>}{message&&<p className="success-message">{message}</p>}<section className="panel cash-movements"><div className="panel-heading"><div><h2>Movimientos del día</h2><p>Ventas en efectivo, gastos, retiros y ajustes.</p></div></div>{register?.movements?.length?register.movements.map((movement:any)=><div className="expense-row" key={movement.id}><div><strong>{movement.description}</strong><small>{movement.type} · {new Date(movement.created_at).toLocaleString('es-AR')}</small></div><b className={movement.amount_cents>=0?'cash-in':'cash-out'}>{movement.amount_cents>=0?'+':''}{money(movement.amount_cents)}</b></div>):<div className="empty-state">No hay movimientos registrados hoy.</div>}</section></div> }
-function Settings({settings,onSaved}:{settings:SettingsData;onSaved:()=>Promise<void>}) { const [form,setForm]=useState(settings); const [aiConfig,setAiConfig]=useState<{model:string;configured:boolean;safeStorageAvailable:boolean}>({model:OLLAMA_MODELS[0].id,configured:false,safeStorageAvailable:false}); const [apiKey,setApiKey]=useState(''); const [aiBusy,setAiBusy]=useState(false); const [currentPassword,setCurrentPassword]=useState(''); const [newPassword,setNewPassword]=useState(''); const [message,setMessage]=useState(''); const [backupBusy,setBackupBusy]=useState(false); useEffect(()=>setForm(settings),[settings]); useEffect(()=>{window.salesApi.ai.getConfig().then(setAiConfig)},[]); const saveAiKey=async()=>{setAiBusy(true);try{if(!apiKey.trim())throw new Error('Ingresá una clave de API.');await window.salesApi.ai.setKey(apiKey);setApiKey('');setAiConfig(await window.salesApi.ai.getConfig());setMessage('Clave de Ollama Cloud guardada de forma segura.')}catch(error){setMessage(error instanceof Error?error.message:'No se pudo guardar la clave.')}finally{setAiBusy(false)}}; const removeAiKey=async()=>{setAiBusy(true);try{await window.salesApi.ai.clearKey();setAiConfig(await window.salesApi.ai.getConfig());setMessage('Clave de Ollama Cloud eliminada.')}catch(error){setMessage(error instanceof Error?error.message:'No se pudo eliminar la clave.')}finally{setAiBusy(false)}}; const saveAiModel=async(model:string)=>{try{const saved=await window.salesApi.ai.saveModel(model);setAiConfig(previous => ({ ...previous, ...saved }))}catch(error){setMessage(error instanceof Error?error.message:'No se pudo guardar el modelo.')}}; const submit=async(e:React.FormEvent)=>{e.preventDefault();try{await window.salesApi.settings.update(form);setMessage('Configuración guardada.');await onSaved()}catch(error){setMessage(error instanceof Error?error.message:'No se pudo guardar la configuración.')}}; const changePassword=async(e:React.FormEvent)=>{e.preventDefault();try{await window.salesApi.settings.changePassword({currentPassword,newPassword});setCurrentPassword('');setNewPassword('');setMessage('Contraseña actualizada.')}catch(error){setMessage(error instanceof Error?error.message:'No se pudo actualizar la contraseña.')}}; const backup=async()=>{setBackupBusy(true);try{const result=await window.salesApi.database.backup();if(!result.canceled)setMessage(`Copia guardada en ${result.filePath}`)}catch(error){setMessage(error instanceof Error?error.message:'No se pudo crear la copia.')}finally{setBackupBusy(false)}}; const restore=async()=>{setBackupBusy(true);try{const result=await window.salesApi.database.restore();if(!result.canceled){setMessage('Base restaurada correctamente.');await onSaved()}}catch(error){setMessage(error instanceof Error?error.message:'No se pudo restaurar la base.')}finally{setBackupBusy(false)}}; return <section className="settings-grid"><div className="panel settings-card"><div className="panel-heading"><div><h2>Configuración del negocio</h2><p>Personalizá la información de tu operación.</p></div></div><form onSubmit={submit}><label>Nombre del negocio<input required maxLength={100} value={form.businessName} onChange={e=>setForm({...form,businessName:e.target.value})} /></label><label>Moneda<input required maxLength={3} value={form.currency} onChange={e=>setForm({...form,currency:e.target.value.toUpperCase()})} /></label><label>Alerta de stock bajo<input required type="number" min="0" step="1" value={form.lowStockThreshold} onChange={e=>setForm({...form,lowStockThreshold:Number(e.target.value)})} /></label>{message&&<p className="success-message">{message}</p>}<button className="primary-button">Guardar configuración</button></form></div><div className="panel settings-card"><div className="panel-heading"><div><h2>IA · Ollama Cloud</h2><p>La clave se cifra y se guarda solo en este equipo.</p></div></div><div className="about-row"><span>Estado</span><b className={aiConfig.configured?'status-label':'muted'}>{aiConfig.configured?'● Configurada':'○ No configurada'}</b></div><label>Clave de API<input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={aiConfig.configured?'••••••••••••':'Pegá tu clave de Ollama Cloud'} autoComplete="off" /></label>{!aiConfig.safeStorageAvailable&&<p className="form-error">El almacenamiento seguro no está disponible. No se puede guardar la clave.</p>}<label>Modelo<select value={aiConfig.model} onChange={e=>saveAiModel(e.target.value)}>{OLLAMA_MODELS.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select></label><div className="modal-actions"><button type="button" className="primary-button" disabled={aiBusy||!aiConfig.safeStorageAvailable} onClick={saveAiKey}>Guardar clave</button>{aiConfig.configured&&<button type="button" className="secondary-button" disabled={aiBusy} onClick={removeAiKey}>Eliminar clave</button>}</div><div className="panel-heading"><div><h2>Seguridad</h2><p>Cambiá la contraseña del administrador.</p></div></div><form onSubmit={changePassword}><label>Contraseña actual<input required type="password" minLength={8} value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} /></label><label>Nueva contraseña<input required type="password" minLength={8} value={newPassword} onChange={e=>setNewPassword(e.target.value)} /></label><button className="secondary-button">Cambiar contraseña</button></form><div className="about-row"><span>Base de datos</span><strong>SQLite local</strong></div><div className="about-row"><span>Estado</span><b className="status-label">● Operativa</b></div><div className="about-row"><span>Copias de seguridad</span><div className="export-actions"><button type="button" className="secondary-button" disabled={backupBusy} onClick={backup}>Crear copia</button><button type="button" className="secondary-button" disabled={backupBusy} onClick={restore}>Restaurar</button></div></div></div></section> }
-function History({sales,onVoided}:{sales:Sale[];onVoided:()=>Promise<void>}) { const [message,setMessage]=useState(''); const [range,setRange]=useState(defaultRange); const [payment,setPayment]=useState('all'); const [filtered,setFiltered]=useState<Sale[]>(sales); const [selected,setSelected]=useState<Sale|null>(null); useEffect(()=>{window.salesApi.sales.list(10000,{...range,paymentMethod:payment}).then(result=>setFiltered(result as Sale[]))},[range.from,range.to,payment,sales.length]); const exportData=async(format:'csv'|'xlsx')=>{const result=await window.salesApi.export(format);if(!result.canceled)setMessage(`Archivo guardado en ${result.filePath}`)}; const total=filtered.reduce((sum,sale)=>sum+sale.total_cents,0); const cash=filtered.filter(sale=>sale.payment_method==='cash').reduce((sum,sale)=>sum+sale.total_cents,0); const card=total-cash; return <section className="panel history-panel"><div className="history-filterbar"><div className="filter-intro"><strong>Filtrar período</strong><span>Revisá y exportá tus ventas</span></div><label>Desde<input type="date" value={range.from} onChange={e=>setRange({...range,from:e.target.value})}/></label><label>Hasta<input type="date" value={range.to} onChange={e=>setRange({...range,to:e.target.value})}/></label><label>Pago<select value={payment} onChange={e=>setPayment(e.target.value)}><option value="all">Todos los medios</option><option value="cash">Efectivo</option><option value="card">Tarjeta</option></select></label></div><div className="history-summary"><div><span>Ventas del período</span><strong>{money(total)}</strong><small>{filtered.length} {filtered.length===1?'venta':'ventas'}</small></div><div><span>En efectivo</span><strong>{money(cash)}</strong><small>Ingresos a caja</small></div><div><span>Con tarjeta</span><strong>{money(card)}</strong><small>Pagos electrónicos</small></div><div><span>Ticket promedio</span><strong>{money(filtered.length ? total/filtered.length : 0)}</strong><small>Por operación</small></div></div><div className="panel-heading history-heading"><div><h2>Historial de ventas</h2><p>Hacé clic en una venta para ver sus productos, cobro y vuelto.</p></div><div className="export-actions"><button className="secondary-button" onClick={()=>exportData('csv')}>Descargar CSV</button><button className="primary-button" onClick={()=>exportData('xlsx')}>Exportar Excel</button></div></div>{message&&<p className="success-message">{message}</p>}<SalesTable sales={filtered} onSelect={setSelected} />{selected&&<SaleDetailModal sale={selected} close={()=>setSelected(null)} onVoided={async()=>{setSelected(null);await onVoided()}} />}</section> }
-function SaleDetailModal({sale,close,onVoided}:{sale:Sale;close:()=>void;onVoided:()=>Promise<void>}) { const [reason,setReason]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false); const voidSale=async()=>{if(!reason.trim())return setError('Ingresá un motivo para anular la venta.'); if(!window.confirm('¿Confirmás anular esta venta? Se devolverá el stock y se revertirá el efectivo cobrado.'))return; setBusy(true);setError('');try{await window.salesApi.sales.void(sale.id,reason.trim());await onVoided()}catch(error){setError(error instanceof Error?error.message:'No se pudo anular la venta.')}finally{setBusy(false)}}; return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><div className="modal sale-detail-modal" role="dialog" aria-modal="true" aria-labelledby="sale-detail-title"><div className="modal-heading"><div><p className="modal-kicker">Detalle de operación</p><h2 id="sale-detail-title">Venta #{String(sale.id).padStart(4,'0')}</h2></div><button type="button" aria-label="Cerrar detalle" onClick={close}>×</button></div><div className="sale-detail-meta"><span>📅 {new Date(sale.created_at).toLocaleString('es-AR')}</span><b className={`pill ${sale.payment_method==='cash'?'green':'blue'}`}>{sale.payment_method==='cash'?'💵 Efectivo':'💳 Tarjeta'}</b></div><div className="sale-items-detail"><h3>Productos vendidos</h3>{sale.items.map(item=><div className="sale-item-detail" key={`${sale.id}-${item.product_id}`}><div><strong>{item.quantity} × {item.product_name}</strong><small>{money(item.unit_price_cents)} por unidad</small></div><b>{money(item.subtotal_cents)}</b></div>)}</div><div className="sale-totals"><div><span>Total cobrado</span><strong>{money(sale.total_cents)}</strong></div><div><span>Recibido</span><b>{money(sale.amount_received_cents)}</b></div><div><span>{sale.payment_method==='cash'?'Vuelto devuelto':'Estado del pago'}</span><b>{sale.payment_method==='cash'?money(sale.change_cents):'Aprobado'}</b></div></div>{(sale.customer_name||sale.notes)&&<div className="sale-extra">{sale.customer_name&&<p><strong>Cliente:</strong> {sale.customer_name}</p>}{sale.notes&&<p><strong>Notas:</strong> {sale.notes}</p>}</div>}{sale.status !== 'voided' && <div className="sale-void-form"><label>Motivo de anulación<textarea required maxLength={500} value={reason} onChange={event=>setReason(event.target.value)} placeholder="Ej. devolución solicitada por el cliente" /></label>{error&&<p className="form-error">{error}</p>}<button type="button" className="secondary-button full-button" disabled={busy} onClick={voidSale}>{busy ? 'Anulando…' : 'Anular venta'}</button></div>}{sale.status === 'voided' && <p className="form-error">Venta anulada{sale.void_record_reason ? `: ${sale.void_record_reason}` : ''}</p>}<button className="secondary-button full-button" onClick={close}>Cerrar detalle</button></div></div> }
-function Reports() { const [date,setDate]=useState(dateInput(new Date())); const [report,setReport]=useState<any>(null); const [message,setMessage]=useState(''); useEffect(()=>{window.salesApi.report.daily(date).then(setReport).catch(error=>setMessage(error instanceof Error?error.message:'No se pudo cargar el reporte.'))},[date]); const exportReport=async(format:'csv'|'xlsx')=>{const result=await window.salesApi.report.export(date,format);if(!result.canceled)setMessage(`Reporte guardado en ${result.filePath}`)}; return <div className="reports-page"><div className="page-actions"><div><h2>Reporte diario</h2><p className="subtitle">Resumen operativo de una jornada local.</p></div><label>Fecha<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><div className="export-actions"><button className="secondary-button" onClick={()=>exportReport('csv')}>CSV</button><button className="primary-button" onClick={()=>exportReport('xlsx')}>Exportar XLSX</button></div></div>{message&&<p className="success-message">{message}</p>}{report&&<><section className="stats-grid"><StatCard label="Ventas" value={money(report.totalCents)} change={`${report.orders} pedidos`} icon="◉" tone="orange"/><StatCard label="Efectivo" value={money(report.paymentSplit.cashCents)} change="Ventas del día" icon="💵" tone="green"/><StatCard label="Tarjeta" value={money(report.paymentSplit.cardCents)} change="Ventas del día" icon="💳" tone="purple"/><StatCard label="Ganancia bruta" value={money(report.grossProfitCents)} change={`${report.marginPercent.toFixed(1)}% margen`} icon="↗" tone="green"/></section><div className="content-grid"><section className="panel"><div className="panel-heading"><div><h2>Gastos por categoría</h2><p>Total: {money(report.expensesTotalCents)}</p></div></div>{report.expenses.length?report.expenses.map((expense:any)=><div className="expense-row" key={expense.category}><strong>{expense.category}</strong><b>{money(expense.total_cents)}</b></div>):<div className="empty-state">No hay gastos en esta fecha.</div>}</section><section className="panel"><div className="panel-heading"><div><h2>Control de caja</h2><p>Estado de la jornada</p></div></div><div className="expense-row"><span>Apertura</span><b>{report.cash.openingCents==null?'—':money(report.cash.openingCents)}</b></div><div className="expense-row"><span>Esperado</span><b>{report.cash.expectedCents==null?'—':money(report.cash.expectedCents)}</b></div><div className="expense-row"><span>Contado</span><b>{report.cash.countedCents==null?'—':money(report.cash.countedCents)}</b></div><div className="expense-row"><span>Diferencia</span><b>{report.cash.differenceCents==null?'—':money(report.cash.differenceCents)}</b></div><p className="success-message">Estado: {report.cash.status === 'closed' ? 'Caja cerrada' : report.cash.status === 'open' ? 'Caja abierta' : 'Sin apertura'}</p></section></div></>}</div> }
+function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => Promise<void> }) {
+  const [cart, setCart] = useState<Record<number, number>>({});
+  const [payment, setPayment] = useState<'cash' | 'card'>('cash');
+  const [received, setReceived] = useState('');
+  const [error, setError] = useState('');
+  const selected = products.filter((p) => cart[p.id]);
+  const total = selected.reduce((sum, p) => sum + p.price_cents * (cart[p.id] || 0), 0);
+  const change = Math.max(0, Math.round(Number(received || 0) * 100) - total);
+  const add = (p: Product, delta: number) =>
+    setCart((c) => ({ ...c, [p.id]: Math.max(0, Math.min(p.stock, (c[p.id] || 0) + delta)) }));
+  const submit = async () => {
+    setError('');
+    if (!selected.length) return setError('Agregá al menos un producto.');
+    if (payment === 'cash' && Number(received) * 100 < total)
+      return setError('El efectivo recibido no alcanza para cubrir el total.');
+    try {
+      await window.salesApi.sales.create({
+        totalCents: total,
+        paymentMethod: payment,
+        amountReceivedCents: payment === 'cash' ? Math.round(Number(received) * 100) : total,
+        changeCents: payment === 'cash' ? change : 0,
+        items: selected.map((p) => ({
+          productId: p.id,
+          productName: p.name,
+          quantity: cart[p.id],
+          unitPriceCents: p.price_cents,
+          subtotalCents: p.price_cents * cart[p.id],
+        })),
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo guardar la venta.');
+    }
+  };
+  return (
+    <div className="checkout-layout">
+      <section className="panel product-picker">
+        <div className="panel-heading">
+          <div>
+            <h2>Elegí los productos</h2>
+            <p>Hacé clic en agregar para sumarlos a la venta.</p>
+          </div>
+        </div>
+        <div className="picker-grid">
+          {products.map((p) => (
+            <button
+              className="picker-card"
+              key={p.id}
+              disabled={!p.stock}
+              onClick={() => add(p, 1)}
+            >
+              <div className="product-thumb">
+                {p.image_path ? <img src={p.image_path} /> : '🍗'}
+              </div>
+              <strong>{p.name}</strong>
+              <span>{money(p.price_cents)}</span>
+              <small>{p.stock} disponibles</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="panel cart-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Detalle de venta</h2>
+            <p>{selected.length} productos seleccionados</p>
+          </div>
+        </div>
+        {selected.map((p) => (
+          <div className="cart-row" key={p.id}>
+            <div>
+              <strong>{p.name}</strong>
+              <small>{money(p.price_cents)} c/u</small>
+            </div>
+            <div className="quantity">
+              <button onClick={() => add(p, -1)}>−</button>
+              <b>{cart[p.id]}</b>
+              <button onClick={() => add(p, 1)}>+</button>
+            </div>
+            <strong>{money(p.price_cents * cart[p.id])}</strong>
+          </div>
+        ))}
+        {!selected.length && <div className="empty-state">Seleccioná productos para comenzar.</div>}
+        <div className="checkout-total">
+          <span>Total</span>
+          <strong>{money(total)}</strong>
+        </div>
+        <div className="payment-tabs">
+          <button
+            className={payment === 'cash' ? 'selected' : ''}
+            onClick={() => setPayment('cash')}
+          >
+            💵 Efectivo
+          </button>
+          <button
+            className={payment === 'card' ? 'selected' : ''}
+            onClick={() => setPayment('card')}
+          >
+            💳 Tarjeta
+          </button>
+        </div>
+        {payment === 'cash' && (
+          <label className="cash-input">
+            Efectivo recibido
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={received}
+              onChange={(e) => setReceived(e.target.value)}
+              placeholder="0,00"
+            />
+            {Number(received) > 0 && (
+              <b className={change >= 0 ? 'change-ok' : 'change-error'}>
+                {change >= 0 ? `Vuelto: ${money(change)}` : 'Falta dinero'}
+              </b>
+            )}
+          </label>
+        )}
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button full-button" disabled={!selected.length} onClick={submit}>
+          Confirmar venta
+        </button>
+      </section>
+    </div>
+  );
+}
+function Login({ onLogin }: { onLogin: (email: string) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      if (await window.salesApi.auth.login({ email, password })) onLogin(email);
+      else setError('Correo o contraseña incorrectos.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <div className="login-logo">P</div>
+        <h1>Bienvenido</h1>
+        <p>Ingresá a Pollo &amp; Caja para continuar</p>
+        <form onSubmit={submit}>
+          <label>
+            Correo electrónico
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="admin@gmail.com"
+            />
+          </label>
+          <label>
+            Contraseña
+            <input
+              type="password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          {error && <div className="form-error">{error}</div>}
+          <button className="primary-button full-button" disabled={busy}>
+            {busy ? 'Ingresando…' : 'Ingresar al sistema'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
+  const [register, setRegister] = useState<any>(null);
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [message, setMessage] = useState('');
+  const load = async () => setRegister(await window.salesApi.cash.get());
+  useEffect(() => {
+    load();
+  }, []);
+  const open = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await window.salesApi.cash.open(Math.round(Number(amount) * 100));
+      setAmount('');
+      setMessage('Caja abierta correctamente.');
+      await load();
+      await onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo abrir la caja.');
+    }
+  };
+  const close = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const result = await window.salesApi.cash.close(Math.round(Number(amount) * 100));
+      setMessage(`Caja cerrada. Diferencia: ${money(result.differenceCents)}`);
+      setAmount('');
+      await load();
+      await onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo cerrar la caja.');
+    }
+  };
+  const withdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await window.salesApi.cash.withdraw({
+        amountCents: Math.round(Number(amount) * 100),
+        reason,
+      });
+      setAmount('');
+      setReason('');
+      setMessage('Retiro registrado correctamente.');
+      await load();
+      await onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo registrar el retiro.');
+    }
+  };
+  const closed = register?.isClosed;
+  return (
+    <div className="cash-page">
+      <div className="cash-summary">
+        <div className="panel cash-balance">
+          <span>Saldo esperado de hoy</span>
+          <strong>{money(register?.balanceCents ?? 0)}</strong>
+          <b className={register?.isOpen ? 'cash-open' : 'cash-closed'}>
+            {register?.isOpen ? '● Caja abierta' : closed ? '● Caja cerrada' : '● Caja sin abrir'}
+          </b>
+          {register?.opening && (
+            <small>
+              Apertura: {money(register.opening.amount_cents)} ·{' '}
+              {new Date(register.opening.created_at).toLocaleTimeString('es-AR')}
+            </small>
+          )}
+          {closed && (
+            <>
+              <small>Contado: {money(register.countedCents ?? register.counted_cents)}</small>
+              <small>
+                Diferencia: {money(register.differenceCents ?? register.difference_cents)}
+              </small>
+            </>
+          )}
+        </div>
+        <div className="panel cash-action">
+          <h2>{register?.isOpen ? 'Cerrar caja' : closed ? 'Caja cerrada' : 'Abrir caja'}</h2>
+          <p>
+            {register?.isOpen
+              ? 'Contá el efectivo disponible para comparar el saldo.'
+              : closed
+                ? 'La jornada ya tiene un cierre registrado.'
+                : 'Ingresá el efectivo inicial de la jornada.'}
+          </p>
+          {!closed && (
+            <form onSubmit={register?.isOpen ? close : open}>
+              <label>
+                {register?.isOpen ? 'Efectivo contado' : 'Saldo inicial'}
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0,00"
+                />
+              </label>
+              <button className="primary-button">
+                {register?.isOpen ? 'Cerrar caja' : 'Abrir caja'}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+      {register?.isOpen && (
+        <section className="panel expense-form">
+          <div className="panel-heading">
+            <div>
+              <h2>Retirar efectivo</h2>
+              <p>Registrá un retiro vinculado a la caja abierta.</p>
+            </div>
+          </div>
+          <form onSubmit={withdraw}>
+            <div className="form-row">
+              <label>
+                Monto
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  required
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0,00"
+                />
+              </label>
+              <label>
+                Motivo
+                <input
+                  required
+                  maxLength={200}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Ej. Retiro del dueño"
+                />
+              </label>
+            </div>
+            <button className="primary-button">Registrar retiro</button>
+          </form>
+        </section>
+      )}
+      {message && <p className="success-message">{message}</p>}
+      <section className="panel cash-movements">
+        <div className="panel-heading">
+          <div>
+            <h2>Movimientos del día</h2>
+            <p>Ventas en efectivo, gastos, retiros y ajustes.</p>
+          </div>
+        </div>
+        {register?.movements?.length ? (
+          register.movements.map((movement: any) => (
+            <div className="expense-row" key={movement.id}>
+              <div>
+                <strong>{movement.description}</strong>
+                <small>
+                  {movement.type} · {new Date(movement.created_at).toLocaleString('es-AR')}
+                </small>
+              </div>
+              <b className={movement.amount_cents >= 0 ? 'cash-in' : 'cash-out'}>
+                {movement.amount_cents >= 0 ? '+' : ''}
+                {money(movement.amount_cents)}
+              </b>
+            </div>
+          ))
+        ) : (
+          <div className="empty-state">No hay movimientos registrados hoy.</div>
+        )}
+      </section>
+    </div>
+  );
+}
+function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () => Promise<void> }) {
+  const [form, setForm] = useState(settings);
+  const [aiConfig, setAiConfig] = useState<{
+    model: string;
+    configured: boolean;
+    safeStorageAvailable: boolean;
+  }>({ model: OLLAMA_MODELS[0].id, configured: false, safeStorageAvailable: false });
+  const [apiKey, setApiKey] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
+  useEffect(() => setForm(settings), [settings]);
+  useEffect(() => {
+    window.salesApi.ai.getConfig().then(setAiConfig);
+  }, []);
+  const saveAiKey = async () => {
+    setAiBusy(true);
+    try {
+      if (!apiKey.trim()) throw new Error('Ingresá una clave de API.');
+      await window.salesApi.ai.setKey(apiKey);
+      setApiKey('');
+      setAiConfig(await window.salesApi.ai.getConfig());
+      setMessage('Clave de Ollama Cloud guardada de forma segura.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo guardar la clave.');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+  const removeAiKey = async () => {
+    setAiBusy(true);
+    try {
+      await window.salesApi.ai.clearKey();
+      setAiConfig(await window.salesApi.ai.getConfig());
+      setMessage('Clave de Ollama Cloud eliminada.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo eliminar la clave.');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+  const saveAiModel = async (model: string) => {
+    try {
+      const saved = await window.salesApi.ai.saveModel(model);
+      setAiConfig((previous) => ({ ...previous, ...saved }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo guardar el modelo.');
+    }
+  };
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await window.salesApi.settings.update(form);
+      setMessage('Configuración guardada.');
+      await onSaved();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo guardar la configuración.');
+    }
+  };
+  const changePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await window.salesApi.settings.changePassword({ currentPassword, newPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      setMessage('Contraseña actualizada.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo actualizar la contraseña.');
+    }
+  };
+  const backup = async () => {
+    setBackupBusy(true);
+    try {
+      const result = await window.salesApi.database.backup();
+      if (!result.canceled) setMessage(`Copia guardada en ${result.filePath}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo crear la copia.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+  const restore = async () => {
+    setBackupBusy(true);
+    try {
+      const result = await window.salesApi.database.restore();
+      if (!result.canceled) {
+        setMessage('Base restaurada correctamente.');
+        await onSaved();
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo restaurar la base.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+  return (
+    <section className="settings-grid">
+      <div className="panel settings-card">
+        <div className="panel-heading">
+          <div>
+            <h2>Configuración del negocio</h2>
+            <p>Personalizá la información de tu operación.</p>
+          </div>
+        </div>
+        <form onSubmit={submit}>
+          <label>
+            Nombre del negocio
+            <input
+              required
+              maxLength={100}
+              value={form.businessName}
+              onChange={(e) => setForm({ ...form, businessName: e.target.value })}
+            />
+          </label>
+          <label>
+            Moneda
+            <input
+              required
+              maxLength={3}
+              value={form.currency}
+              onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
+            />
+          </label>
+          <label>
+            Alerta de stock bajo
+            <input
+              required
+              type="number"
+              min="0"
+              step="1"
+              value={form.lowStockThreshold}
+              onChange={(e) => setForm({ ...form, lowStockThreshold: Number(e.target.value) })}
+            />
+          </label>
+          {message && <p className="success-message">{message}</p>}
+          <button className="primary-button">Guardar configuración</button>
+        </form>
+      </div>
+      <div className="panel settings-card">
+        <div className="panel-heading">
+          <div>
+            <h2>IA · Ollama Cloud</h2>
+            <p>La clave se cifra y se guarda solo en este equipo.</p>
+          </div>
+        </div>
+        <div className="about-row">
+          <span>Estado</span>
+          <b className={aiConfig.configured ? 'status-label' : 'muted'}>
+            {aiConfig.configured ? '● Configurada' : '○ No configurada'}
+          </b>
+        </div>
+        <label>
+          Clave de API
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={aiConfig.configured ? '••••••••••••' : 'Pegá tu clave de Ollama Cloud'}
+            autoComplete="off"
+          />
+        </label>
+        {!aiConfig.safeStorageAvailable && (
+          <p className="form-error">
+            El almacenamiento seguro no está disponible. No se puede guardar la clave.
+          </p>
+        )}
+        <label>
+          Modelo
+          <select value={aiConfig.model} onChange={(e) => saveAiModel(e.target.value)}>
+            {OLLAMA_MODELS.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={aiBusy || !aiConfig.safeStorageAvailable}
+            onClick={saveAiKey}
+          >
+            Guardar clave
+          </button>
+          {aiConfig.configured && (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={aiBusy}
+              onClick={removeAiKey}
+            >
+              Eliminar clave
+            </button>
+          )}
+        </div>
+        <div className="panel-heading">
+          <div>
+            <h2>Seguridad</h2>
+            <p>Cambiá la contraseña del administrador.</p>
+          </div>
+        </div>
+        <form onSubmit={changePassword}>
+          <label>
+            Contraseña actual
+            <input
+              required
+              type="password"
+              minLength={8}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
+          </label>
+          <label>
+            Nueva contraseña
+            <input
+              required
+              type="password"
+              minLength={8}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+          </label>
+          <button className="secondary-button">Cambiar contraseña</button>
+        </form>
+        <div className="about-row">
+          <span>Base de datos</span>
+          <strong>SQLite local</strong>
+        </div>
+        <div className="about-row">
+          <span>Estado</span>
+          <b className="status-label">● Operativa</b>
+        </div>
+        <div className="about-row">
+          <span>Copias de seguridad</span>
+          <div className="export-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={backupBusy}
+              onClick={backup}
+            >
+              Crear copia
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={backupBusy}
+              onClick={restore}
+            >
+              Restaurar
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+function History({ sales, onVoided }: { sales: Sale[]; onVoided: () => Promise<void> }) {
+  const [message, setMessage] = useState('');
+  const [range, setRange] = useState(defaultRange);
+  const [payment, setPayment] = useState('all');
+  const [filtered, setFiltered] = useState<Sale[]>(sales);
+  const [selected, setSelected] = useState<Sale | null>(null);
+  useEffect(() => {
+    window.salesApi.sales
+      .list(10000, { ...range, paymentMethod: payment })
+      .then((result) => setFiltered(result as Sale[]));
+  }, [range.from, range.to, payment, sales.length]);
+  const exportData = async (format: 'csv' | 'xlsx') => {
+    const result = await window.salesApi.export(format);
+    if (!result.canceled) setMessage(`Archivo guardado en ${result.filePath}`);
+  };
+  const total = filtered.reduce((sum, sale) => sum + sale.total_cents, 0);
+  const cash = filtered
+    .filter((sale) => sale.payment_method === 'cash')
+    .reduce((sum, sale) => sum + sale.total_cents, 0);
+  const card = total - cash;
+  return (
+    <section className="panel history-panel">
+      <div className="history-filterbar">
+        <div className="filter-intro">
+          <strong>Filtrar período</strong>
+          <span>Revisá y exportá tus ventas</span>
+        </div>
+        <label>
+          Desde
+          <input
+            type="date"
+            value={range.from}
+            onChange={(e) => setRange({ ...range, from: e.target.value })}
+          />
+        </label>
+        <label>
+          Hasta
+          <input
+            type="date"
+            value={range.to}
+            onChange={(e) => setRange({ ...range, to: e.target.value })}
+          />
+        </label>
+        <label>
+          Pago
+          <select value={payment} onChange={(e) => setPayment(e.target.value)}>
+            <option value="all">Todos los medios</option>
+            <option value="cash">Efectivo</option>
+            <option value="card">Tarjeta</option>
+          </select>
+        </label>
+      </div>
+      <div className="history-summary">
+        <div>
+          <span>Ventas del período</span>
+          <strong>{money(total)}</strong>
+          <small>
+            {filtered.length} {filtered.length === 1 ? 'venta' : 'ventas'}
+          </small>
+        </div>
+        <div>
+          <span>En efectivo</span>
+          <strong>{money(cash)}</strong>
+          <small>Ingresos a caja</small>
+        </div>
+        <div>
+          <span>Con tarjeta</span>
+          <strong>{money(card)}</strong>
+          <small>Pagos electrónicos</small>
+        </div>
+        <div>
+          <span>Ticket promedio</span>
+          <strong>{money(filtered.length ? total / filtered.length : 0)}</strong>
+          <small>Por operación</small>
+        </div>
+      </div>
+      <div className="panel-heading history-heading">
+        <div>
+          <h2>Historial de ventas</h2>
+          <p>Hacé clic en una venta para ver sus productos, cobro y vuelto.</p>
+        </div>
+        <div className="export-actions">
+          <button className="secondary-button" onClick={() => exportData('csv')}>
+            Descargar CSV
+          </button>
+          <button className="primary-button" onClick={() => exportData('xlsx')}>
+            Exportar Excel
+          </button>
+        </div>
+      </div>
+      {message && <p className="success-message">{message}</p>}
+      <SalesTable sales={filtered} onSelect={setSelected} />
+      {selected && (
+        <SaleDetailModal
+          sale={selected}
+          close={() => setSelected(null)}
+          onVoided={async () => {
+            setSelected(null);
+            await onVoided();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+function SaleDetailModal({
+  sale,
+  close,
+  onVoided,
+}: {
+  sale: Sale;
+  close: () => void;
+  onVoided: () => Promise<void>;
+}) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const voidSale = async () => {
+    if (!reason.trim()) return setError('Ingresá un motivo para anular la venta.');
+    if (
+      !window.confirm(
+        '¿Confirmás anular esta venta? Se devolverá el stock y se revertirá el efectivo cobrado.',
+      )
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await window.salesApi.sales.void(sale.id, reason.trim());
+      await onVoided();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo anular la venta.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
+      <div
+        className="modal sale-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sale-detail-title"
+      >
+        <div className="modal-heading">
+          <div>
+            <p className="modal-kicker">Detalle de operación</p>
+            <h2 id="sale-detail-title">Venta #{String(sale.id).padStart(4, '0')}</h2>
+          </div>
+          <button type="button" aria-label="Cerrar detalle" onClick={close}>
+            ×
+          </button>
+        </div>
+        <div className="sale-detail-meta">
+          <span>📅 {new Date(sale.created_at).toLocaleString('es-AR')}</span>
+          <b className={`pill ${sale.payment_method === 'cash' ? 'green' : 'blue'}`}>
+            {sale.payment_method === 'cash' ? '💵 Efectivo' : '💳 Tarjeta'}
+          </b>
+        </div>
+        <div className="sale-items-detail">
+          <h3>Productos vendidos</h3>
+          {sale.items.map((item) => (
+            <div className="sale-item-detail" key={`${sale.id}-${item.product_id}`}>
+              <div>
+                <strong>
+                  {item.quantity} × {item.product_name}
+                </strong>
+                <small>{money(item.unit_price_cents)} por unidad</small>
+              </div>
+              <b>{money(item.subtotal_cents)}</b>
+            </div>
+          ))}
+        </div>
+        <div className="sale-totals">
+          <div>
+            <span>Total cobrado</span>
+            <strong>{money(sale.total_cents)}</strong>
+          </div>
+          <div>
+            <span>Recibido</span>
+            <b>{money(sale.amount_received_cents)}</b>
+          </div>
+          <div>
+            <span>{sale.payment_method === 'cash' ? 'Vuelto devuelto' : 'Estado del pago'}</span>
+            <b>{sale.payment_method === 'cash' ? money(sale.change_cents) : 'Aprobado'}</b>
+          </div>
+        </div>
+        {(sale.customer_name || sale.notes) && (
+          <div className="sale-extra">
+            {sale.customer_name && (
+              <p>
+                <strong>Cliente:</strong> {sale.customer_name}
+              </p>
+            )}
+            {sale.notes && (
+              <p>
+                <strong>Notas:</strong> {sale.notes}
+              </p>
+            )}
+          </div>
+        )}
+        {sale.status !== 'voided' && (
+          <div className="sale-void-form">
+            <label>
+              Motivo de anulación
+              <textarea
+                required
+                maxLength={500}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Ej. devolución solicitada por el cliente"
+              />
+            </label>
+            {error && <p className="form-error">{error}</p>}
+            <button
+              type="button"
+              className="secondary-button full-button"
+              disabled={busy}
+              onClick={voidSale}
+            >
+              {busy ? 'Anulando…' : 'Anular venta'}
+            </button>
+          </div>
+        )}
+        {sale.status === 'voided' && (
+          <p className="form-error">
+            Venta anulada{sale.void_record_reason ? `: ${sale.void_record_reason}` : ''}
+          </p>
+        )}
+        <button className="secondary-button full-button" onClick={close}>
+          Cerrar detalle
+        </button>
+      </div>
+    </div>
+  );
+}
+function Reports() {
+  const [date, setDate] = useState(dateInput(new Date()));
+  const [report, setReport] = useState<any>(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    window.salesApi.report
+      .daily(date)
+      .then(setReport)
+      .catch((error) =>
+        setMessage(error instanceof Error ? error.message : 'No se pudo cargar el reporte.'),
+      );
+  }, [date]);
+  const exportReport = async (format: 'csv' | 'xlsx') => {
+    const result = await window.salesApi.report.export(date, format);
+    if (!result.canceled) setMessage(`Reporte guardado en ${result.filePath}`);
+  };
+  return (
+    <div className="reports-page">
+      <div className="page-actions">
+        <div>
+          <h2>Reporte diario</h2>
+          <p className="subtitle">Resumen operativo de una jornada local.</p>
+        </div>
+        <label>
+          Fecha
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <div className="export-actions">
+          <button className="secondary-button" onClick={() => exportReport('csv')}>
+            CSV
+          </button>
+          <button className="primary-button" onClick={() => exportReport('xlsx')}>
+            Exportar XLSX
+          </button>
+        </div>
+      </div>
+      {message && <p className="success-message">{message}</p>}
+      {report && (
+        <>
+          <section className="stats-grid">
+            <StatCard
+              label="Ventas"
+              value={money(report.totalCents)}
+              change={`${report.orders} pedidos`}
+              icon="◉"
+              tone="orange"
+            />
+            <StatCard
+              label="Efectivo"
+              value={money(report.paymentSplit.cashCents)}
+              change="Ventas del día"
+              icon="💵"
+              tone="green"
+            />
+            <StatCard
+              label="Tarjeta"
+              value={money(report.paymentSplit.cardCents)}
+              change="Ventas del día"
+              icon="💳"
+              tone="purple"
+            />
+            <StatCard
+              label="Ganancia bruta"
+              value={money(report.grossProfitCents)}
+              change={`${report.marginPercent.toFixed(1)}% margen`}
+              icon="↗"
+              tone="green"
+            />
+          </section>
+          <div className="content-grid">
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Gastos por categoría</h2>
+                  <p>Total: {money(report.expensesTotalCents)}</p>
+                </div>
+              </div>
+              {report.expenses.length ? (
+                report.expenses.map((expense: any) => (
+                  <div className="expense-row" key={expense.category}>
+                    <strong>{expense.category}</strong>
+                    <b>{money(expense.total_cents)}</b>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state">No hay gastos en esta fecha.</div>
+              )}
+            </section>
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Control de caja</h2>
+                  <p>Estado de la jornada</p>
+                </div>
+              </div>
+              <div className="expense-row">
+                <span>Apertura</span>
+                <b>{report.cash.openingCents == null ? '—' : money(report.cash.openingCents)}</b>
+              </div>
+              <div className="expense-row">
+                <span>Esperado</span>
+                <b>{report.cash.expectedCents == null ? '—' : money(report.cash.expectedCents)}</b>
+              </div>
+              <div className="expense-row">
+                <span>Contado</span>
+                <b>{report.cash.countedCents == null ? '—' : money(report.cash.countedCents)}</b>
+              </div>
+              <div className="expense-row">
+                <span>Diferencia</span>
+                <b>
+                  {report.cash.differenceCents == null ? '—' : money(report.cash.differenceCents)}
+                </b>
+              </div>
+              <p className="success-message">
+                Estado:{' '}
+                {report.cash.status === 'closed'
+                  ? 'Caja cerrada'
+                  : report.cash.status === 'open'
+                    ? 'Caja abierta'
+                    : 'Sin apertura'}
+              </p>
+            </section>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
-function Expenses({onChanged}:{onChanged:()=>Promise<void>}) { const [expenses,setExpenses]=useState<any[]>([]); const [description,setDescription]=useState(''); const [amount,setAmount]=useState(''); const [category,setCategory]=useState('insumos'); const load=async()=>setExpenses(await window.salesApi.expenses.list(100)); useEffect(()=>{load()},[]); const submit=async(e:React.FormEvent)=>{e.preventDefault();if(!description||Number(amount)<=0)return;await window.salesApi.expenses.create({description,amountCents:Math.round(Number(amount)*100),category});setDescription('');setAmount('');await load();await onChanged()};return <div className="expenses-layout"><section className="panel expense-form"><div className="panel-heading"><div><h2>Registrar gasto</h2><p>Cargá compras y egresos de la caja.</p></div></div><form onSubmit={submit}><label>Descripción<input required value={description} onChange={e=>setDescription(e.target.value)} placeholder="Ej. Compra de carbón" /></label><div className="form-row"><label>Monto<input required type="number" min="0.01" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0,00" /></label><label>Categoría<select value={category} onChange={e=>setCategory(e.target.value)}><option value="insumos">Insumos</option><option value="servicios">Servicios</option><option value="personal">Personal</option><option value="other">Otros</option></select></label></div><button className="primary-button">Guardar gasto</button></form></section><section className="panel history-panel"><div className="panel-heading"><div><h2>Gastos registrados</h2><p>Últimos egresos de la operación.</p></div></div>{expenses.length?expenses.map(exp=><div className="expense-row" key={exp.id}><div><strong>{exp.description}</strong><small>{exp.category} · {new Date(exp.created_at).toLocaleString('es-AR')}</small></div><b>{money(exp.amount_cents)}</b></div>):<div className="empty-state">Todavía no hay gastos registrados.</div>}</section></div> }
+function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState('');
+  const [category, setCategory] = useState('insumos');
+  const load = async () => setExpenses(await window.salesApi.expenses.list(100));
+  useEffect(() => {
+    load();
+  }, []);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!description || Number(amount) <= 0) return;
+    await window.salesApi.expenses.create({
+      description,
+      amountCents: Math.round(Number(amount) * 100),
+      category,
+    });
+    setDescription('');
+    setAmount('');
+    await load();
+    await onChanged();
+  };
+  return (
+    <div className="expenses-layout">
+      <section className="panel expense-form">
+        <div className="panel-heading">
+          <div>
+            <h2>Registrar gasto</h2>
+            <p>Cargá compras y egresos de la caja.</p>
+          </div>
+        </div>
+        <form onSubmit={submit}>
+          <label>
+            Descripción
+            <input
+              required
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej. Compra de carbón"
+            />
+          </label>
+          <div className="form-row">
+            <label>
+              Monto
+              <input
+                required
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0,00"
+              />
+            </label>
+            <label>
+              Categoría
+              <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="insumos">Insumos</option>
+                <option value="servicios">Servicios</option>
+                <option value="personal">Personal</option>
+                <option value="other">Otros</option>
+              </select>
+            </label>
+          </div>
+          <button className="primary-button">Guardar gasto</button>
+        </form>
+      </section>
+      <section className="panel history-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Gastos registrados</h2>
+            <p>Últimos egresos de la operación.</p>
+          </div>
+        </div>
+        {expenses.length ? (
+          expenses.map((exp) => (
+            <div className="expense-row" key={exp.id}>
+              <div>
+                <strong>{exp.description}</strong>
+                <small>
+                  {exp.category} · {new Date(exp.created_at).toLocaleString('es-AR')}
+                </small>
+              </div>
+              <b>{money(exp.amount_cents)}</b>
+            </div>
+          ))
+        ) : (
+          <div className="empty-state">Todavía no hay gastos registrados.</div>
+        )}
+      </section>
+    </div>
+  );
+}
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

@@ -11,7 +11,7 @@ Improve source readability and maintainability without changing runtime behavior
 
 ## Tasks
 1. Add formatter configuration and scripts — complete
-2. Format renderer source in a bounded slice — pending
+2. Format renderer source in a bounded slice — complete
 3. Format Electron/main-process source in a bounded slice — pending
 4. Verify, commit, push, and package — pending
 
