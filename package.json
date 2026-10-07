@@ -10,6 +10,8 @@
     "build": "node scripts/merge-styles.cjs && node scripts/visual-polish.cjs && tsc && vite build && node scripts/fix-dist-paths.cjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "format": "prettier --write --ignore-unknown \"src/**/*\" \"electron/**/*\" \"scripts/**/*\" package.json \"tsconfig*.json\" vite.config.ts",
+    "format:check": "prettier --check --ignore-unknown \"src/**/*\" \"electron/**/*\" \"scripts/**/*\" package.json \"tsconfig*.json\" vite.config.ts",
     "dist": "npm run build && electron-builder --win",
     "pack": "npm run build && electron-builder --dir"
   },
@@ -28,6 +30,7 @@
     "concurrently": "latest",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
+    "prettier": "3.5.3",
     "typescript": "latest",
     "vite": "latest",
     "wait-on": "latest"
