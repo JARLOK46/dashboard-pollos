@@ -134,6 +134,7 @@ function migrate(database) {
   `);
   const productColumns = database.prepare('PRAGMA table_info(products)').all().map((column) => column.name);
   if (!productColumns.includes('cost_cents')) database.exec('ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (cost_cents >= 0)');
+  if (!productColumns.includes('active')) database.exec('ALTER TABLE products ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
   const saleColumns = database.prepare('PRAGMA table_info(sales)').all().map((column) => column.name);
   if (!saleColumns.includes('status')) database.exec("ALTER TABLE sales ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
   if (!saleColumns.includes('voided_at')) database.exec('ALTER TABLE sales ADD COLUMN voided_at TEXT');
@@ -333,6 +334,14 @@ function updateProduct(input) {
     return updated;
   })();
   if (!result.changes) throw new Error('El producto no existe.');
+  return database.prepare('SELECT * FROM products WHERE id = ?').get(input.id);
+}
+
+function archiveProduct(input) {
+  if (!Number.isInteger(input?.id) || input.id <= 0) throw new Error('El producto no es válido.');
+  const database = getDatabase();
+  const result = database.prepare('UPDATE products SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND active = 1').run(input.id);
+  if (!result.changes) throw new Error('El producto no existe o ya está archivado.');
   return database.prepare('SELECT * FROM products WHERE id = ?').get(input.id);
 }
 
@@ -599,4 +608,4 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
-module.exports = { getDatabase, listProducts, createProduct, updateProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, getOllamaSettings, saveOllamaModel, updateOllamaConfigured, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };
+module.exports = { getDatabase, listProducts, createProduct, updateProduct, archiveProduct, adjustProductStock, listInventoryMovements, createSale, voidSale, getSale, listSales, getSalesAnalytics, createExpense, createWithdrawal, listExpenses, getDailyReport, getDashboardSummary, getDashboardAlerts, getSettings, updateSettings, getOllamaSettings, saveOllamaModel, updateOllamaConfigured, authenticateAdmin, changeAdminPassword, openCashRegister, getCashRegister, closeCashRegister, backupDatabase, restoreDatabase };

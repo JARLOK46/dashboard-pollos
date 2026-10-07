@@ -166,9 +166,20 @@ button:disabled {
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
   color:#6f7987;
   font-size:10px
 }
+.product-actions { display:flex; gap:6px; flex-wrap:wrap; margin-left:auto }
+.product-actions .link-button { border:1px solid #eadfd6; border-radius:7px; padding:6px 8px; cursor:pointer; transition:background .15s,color .15s,border-color .15s }
+.product-action-adjust { color:#b45309; background:#fff7ed }
+.product-action-history { color:#5b21b6; background:#f5f3ff }
+.product-action-edit { color:#0369a1; background:#eff6ff }
+.product-actions .link-button:hover,.product-actions .link-button:focus-visible { border-color:currentColor; filter:brightness(.96) }
+.archive-button { border:1px solid #f2b8b5; background:#fff1f0; color:#b42318; border-radius:8px; padding:10px 13px; font:inherit; font-weight:700; cursor:pointer }
+.archive-button:hover,.archive-button:focus-visible { background:#ffe1df }
+@media(max-width:430px) { .product-actions { width:100%; margin-left:0 } .product-actions .link-button { flex:1 1 auto } .modal-actions { flex-wrap:wrap } .archive-button { order:3; width:100% } }
 .low-stock {
   color:#e65041
 }
