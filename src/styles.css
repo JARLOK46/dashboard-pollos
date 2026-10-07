@@ -136,7 +136,10 @@ button:disabled {
   transition:transform .2s ease
 }
 .product-card-body {
-  padding:16px 17px 17px
+  padding:16px 17px 17px;
+  display:flex;
+  flex-direction:column;
+  min-height:190px
 }
 .product-card {
   transition:transform .18s ease,box-shadow .18s ease
@@ -166,6 +169,7 @@ button:disabled {
   display:flex;
   justify-content:space-between;
   align-items:center;
+  margin-top:auto;
   gap:8px;
   flex-wrap:wrap;
   color:#6f7987;
@@ -179,6 +183,11 @@ button:disabled {
 .product-actions .link-button:hover,.product-actions .link-button:focus-visible { border-color:currentColor; filter:brightness(.96) }
 .archive-button { border:1px solid #f2b8b5; background:#fff1f0; color:#b42318; border-radius:8px; padding:10px 13px; font:inherit; font-weight:700; cursor:pointer }
 .archive-button:hover,.archive-button:focus-visible { background:#ffe1df }
+.destructive-button { border:1px solid #b42318; background:#b42318; color:#fff; border-radius:8px; padding:10px 13px; font:inherit; font-weight:700; cursor:pointer }
+.destructive-button:hover,.destructive-button:focus-visible { background:#8f1d16; border-color:#8f1d16 }
+.delete-modal { max-width:430px }
+.delete-explanation { color:#687281; font-size:12px; line-height:1.5; margin:8px 0 16px }
+@media(max-width:430px) { .product-card-body { min-height:0 } }
 @media(max-width:430px) { .product-actions { width:100%; margin-left:0 } .product-actions .link-button { flex:1 1 auto } .modal-actions { flex-wrap:wrap } .archive-button { order:3; width:100% } }
 .low-stock {
   color:#e65041

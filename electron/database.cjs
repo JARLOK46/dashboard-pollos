@@ -341,7 +341,7 @@ function archiveProduct(input) {
   if (!Number.isInteger(input?.id) || input.id <= 0) throw new Error('El producto no es válido.');
   const database = getDatabase();
   const result = database.prepare('UPDATE products SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND active = 1').run(input.id);
-  if (!result.changes) throw new Error('El producto no existe o ya está archivado.');
+  if (!result.changes) throw new Error('El producto no existe o ya está eliminado.');
   return database.prepare('SELECT * FROM products WHERE id = ?').get(input.id);
 }
 
