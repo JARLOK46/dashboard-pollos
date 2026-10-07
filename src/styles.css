@@ -2403,3 +2403,11 @@ html, body { overflow:hidden; }
   background:#202c3b;
   color:#c0ccd9;
 }
+
+/* Keep metric detail text on the metric card surface, not the assistant bubble. */
+.ai-message.assistant .ai-metric span {
+  background:transparent;
+}
+.dark-theme .ai-message.assistant .ai-metric span {
+  background:transparent;
+}
