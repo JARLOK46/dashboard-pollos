@@ -1016,7 +1016,7 @@ function appendAiMessage(input) {
     database
       .prepare('UPDATE ai_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(title, sessionId);
-    return { id: Number(result), sessionId, title };
+    return { id: Number(message.lastInsertRowid), sessionId, title };
   })();
   return result;
 }
