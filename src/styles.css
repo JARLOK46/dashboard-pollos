@@ -250,6 +250,17 @@ button:disabled {
   line-height: 1.5;
   margin: 8px 0 16px;
 }
+.chat-delete-backdrop { z-index: 30; padding: 16px; }
+.chat-delete-modal { width: min(430px, 100%); }
+.chat-delete-name { margin: 0; color: #202533; font-weight: 700; overflow-wrap: anywhere; }
+.chat-delete-modal .modal-actions { margin-top: 22px; }
+@media (max-width: 480px) {
+  .chat-delete-modal { padding: 20px; }
+  .chat-delete-modal .modal-actions { flex-direction: column-reverse; }
+  .chat-delete-modal .modal-actions button { width: 100%; }
+}
+.dark-theme .chat-delete-name { color: var(--ink); }
+.dark-theme .chat-delete-modal .delete-explanation { color: #b9c6d5; }
 @media (max-width: 430px) {
   .product-card-body {
     min-height: 0;

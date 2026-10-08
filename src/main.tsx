@@ -590,6 +590,10 @@ function ExpenseToolPreview({
     </div>
   );
 }
+function ChatDeleteModal({ conversation, busy, close, confirm }: { conversation: { id: string; title: string } | null; busy: boolean; close: () => void; confirm: () => void }) {
+  if (!conversation) return null;
+  return <div className="modal-backdrop chat-delete-backdrop"><div className="modal delete-modal chat-delete-modal" role="dialog" aria-modal="true" aria-labelledby="chat-delete-title" aria-describedby="chat-delete-description"><div className="modal-heading"><h2 id="chat-delete-title">¿Eliminar este chat?</h2><button type="button" aria-label="Cerrar confirmación" onClick={close} disabled={busy}>×</button></div><p className="chat-delete-name">“{conversation.title}”</p><p id="chat-delete-description" className="delete-explanation">El chat y todos sus mensajes se eliminarán permanentemente. Esta acción no se puede deshacer.</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={close} disabled={busy}>Cancelar</button><button type="button" className="destructive-button" onClick={confirm} disabled={busy}>{busy ? 'Eliminando…' : 'Eliminar chat'}</button></div></div></div>;
+}
 function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () => Promise<void> }) {
   type Message = {
     role: 'user' | 'assistant';
@@ -615,6 +619,8 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
   const [error, setError] = useState('');
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [currency, setCurrency] = useState('ARS');
   const activeIdRef = useRef(activeId);
   const deletingSessionIdsRef = useRef(new Set<string>());
@@ -717,8 +723,9 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     setHistoryOpen(false);
   };
   const deleteConversation = async (id: string) => {
-    if (busy || !window.confirm('¿Eliminar este chat permanentemente?')) return;
+    if (busy || deletingId) return;
     const currentId = activeId;
+    setDeletingId(id);
     deletingSessionIdsRef.current.add(id);
     try {
       await window.salesApi.ai.sessions.delete(id);
@@ -746,6 +753,8 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
       setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
     } finally {
       deletingSessionIdsRef.current.delete(id);
+      setDeletingId(null);
+      setPendingDelete(null);
     }
   };
   const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => {
@@ -885,8 +894,8 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
                     <button
                       type="button"
                       aria-label={`Eliminar chat ${conversation.title}`}
-                      onClick={() => void deleteConversation(conversation.id)}
-                      disabled={busy}
+                      onClick={() => setPendingDelete(conversation)}
+                      disabled={busy || Boolean(deletingId)}
                     >
                       Eliminar
                     </button>
@@ -998,6 +1007,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
           </form>
         </section>
       )}
+      <ChatDeleteModal conversation={pendingDelete} busy={Boolean(deletingId)} close={() => setPendingDelete(null)} confirm={() => { if (pendingDelete) void deleteConversation(pendingDelete.id); }} />
       {visible && (
         <button
           type="button"
@@ -1042,6 +1052,8 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [currency, setCurrency] = useState('ARS');
   const activeIdRef = useRef(activeId);
   const deletingSessionIdsRef = useRef(new Set<string>());
@@ -1103,8 +1115,9 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
       previous.map((item) => (item.id === active?.id ? update(item) : item)),
     );
   const deleteConversation = async (id: string) => {
-    if (busy || !window.confirm('¿Eliminar este chat permanentemente?')) return;
+    if (busy || deletingId) return;
     const currentId = activeId;
+    setDeletingId(id);
     deletingSessionIdsRef.current.add(id);
     try {
       await window.salesApi.ai.sessions.delete(id);
@@ -1132,6 +1145,8 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
       setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
     } finally {
       deletingSessionIdsRef.current.delete(id);
+      setDeletingId(null);
+      setPendingDelete(null);
     }
   };
   const newChat = async () => {
@@ -1277,8 +1292,8 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
                   <button
                     type="button"
                     aria-label={`Eliminar chat ${item.title}`}
-                    onClick={() => void deleteConversation(item.id)}
-                    disabled={busy}
+                    onClick={() => setPendingDelete(item)}
+                    disabled={busy || Boolean(deletingId)}
                   >
                     Eliminar
                   </button>
@@ -1385,6 +1400,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
           </button>
         </form>
       </div>
+      <ChatDeleteModal conversation={pendingDelete} busy={Boolean(deletingId)} close={() => setPendingDelete(null)} confirm={() => { if (pendingDelete) void deleteConversation(pendingDelete.id); }} />
     </section>
   );
 }
