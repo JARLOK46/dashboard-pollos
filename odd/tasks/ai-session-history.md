@@ -17,7 +17,7 @@ Persist every AI conversation session and show it in Historial across applicatio
 ## Tasks
 1. Add durable schema, migration, database functions, and IPC bridge — complete
 2. Replace in-memory-only conversation persistence in both AI surfaces — complete
-3. Verify persistence, error handling, and history behavior — in progress (commit/push explicitly prohibited)
+3. Verify persistence, error handling, and history behavior — complete
 
 ## Acceptance criteria
 - Every session and message survives app restart.

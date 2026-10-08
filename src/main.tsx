@@ -600,8 +600,9 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     toolCall?: AiToolCall | null;
   };
   type Conversation = { id: string; title: string; updatedAt: number; messages: Message[] };
+  const createConversationId = () => `ai-session-${crypto.randomUUID()}`;
   const firstConversation = (): Conversation => ({
-    id: 'default-ai-session',
+    id: createConversationId(),
     title: 'Nuevo chat',
     updatedAt: Date.now(),
     messages: [],
@@ -975,8 +976,9 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
     toolCall?: AiToolCall | null;
   };
   type Conversation = { id: string; title: string; updatedAt: number; messages: Message[] };
+  const createConversationId = () => `ai-session-${crypto.randomUUID()}`;
   const makeConversation = (): Conversation => ({
-    id: 'default-ai-session',
+    id: createConversationId(),
     title: 'Nuevo chat',
     updatedAt: Date.now(),
     messages: [],
