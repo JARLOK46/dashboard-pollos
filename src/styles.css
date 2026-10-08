@@ -3555,3 +3555,53 @@ body {
 .dark-theme .ai-message.assistant .ai-metric span {
   background: transparent;
 }
+
+/* AI history rows contain independent selection and deletion actions. */
+.ai-history-item {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.ai-history-item > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+.ai-history-item > button:first-child:focus-visible,
+.ai-history-item > button:last-child:focus-visible {
+  outline: 2px solid #ff9a56;
+  outline-offset: 2px;
+}
+.ai-history-item > button:last-child {
+  flex: 0 0 auto;
+  align-self: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #f08b84;
+  padding: 5px 7px;
+  font: 600 10px 'DM Sans';
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.ai-history-item > button:last-child:hover,
+.ai-history-item > button:last-child:focus-visible {
+  background: #512c32;
+  border-color: #b85a58;
+  color: #ffb3ad;
+}
+.dark-theme .ai-history-item > button:last-child {
+  color: #ffaaa3;
+}
+.dark-theme .ai-history-item > button:last-child:hover,
+.dark-theme .ai-history-item > button:last-child:focus-visible {
+  background: #552d34;
+  border-color: #c56865;
+  color: #ffd0ca;
+}

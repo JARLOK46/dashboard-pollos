@@ -446,6 +446,7 @@ function registerIpc() {
   ipcMain.handle('settings:update', (_event, input) => database.updateSettings(input));
   ipcMain.handle('ai:sessions:list', (_event, limit) => database.listAiSessions(limit));
   ipcMain.handle('ai:sessions:get', (_event, id) => database.getAiSession(id));
+  ipcMain.handle('ai:sessions:delete', (_event, id) => database.deleteAiSession(id));
   ipcMain.handle('ai:sessions:create', (_event, input) => database.createAiSession(input));
   ipcMain.handle('ai:sessions:get-or-create', (_event, input) =>
     database.getOrCreateAiSession(input),

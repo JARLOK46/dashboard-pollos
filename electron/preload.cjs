@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('salesApi', {
     sessions: {
       list: (limit) => ipcRenderer.invoke('ai:sessions:list', limit),
       get: (id) => ipcRenderer.invoke('ai:sessions:get', id),
+      delete: (id) => ipcRenderer.invoke('ai:sessions:delete', id),
       create: (input) => ipcRenderer.invoke('ai:sessions:create', input),
       getOrCreate: (input) => ipcRenderer.invoke('ai:sessions:get-or-create', input),
       append: (input) => ipcRenderer.invoke('ai:sessions:append', input),

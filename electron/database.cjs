@@ -963,6 +963,15 @@ function listAiSessions(limit) {
     ? getDatabase().prepare(query).all()
     : getDatabase().prepare(`${query} LIMIT ?`).all(limit);
 }
+function deleteAiSession(id) {
+  const sessionId = validateAiSessionId(id);
+  const database = getDatabase();
+  database.transaction(() => {
+    const result = database.prepare('DELETE FROM ai_sessions WHERE id = ?').run(sessionId);
+    if (result.changes !== 1) throw new Error('La sesión no existe.');
+  })();
+  return { id: sessionId, deleted: true };
+}
 function getAiSession(id) {
   validateAiSessionId(id);
   const database = getDatabase();
@@ -1270,6 +1279,7 @@ module.exports = {
   getOrCreateAiSession,
   listAiSessions,
   getAiSession,
+  deleteAiSession,
   appendAiMessage,
   listProducts,
   createProduct,

@@ -194,6 +194,7 @@ declare global {
             }>;
           } | null>;
           create(input: { id: string; title: string }): Promise<unknown>;
+          delete(id: string): Promise<{ id: string; deleted: true }>;
           getOrCreate(input: { id: string; title: string }): Promise<{
             id: string;
             title: string;

@@ -616,6 +616,9 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [currency, setCurrency] = useState('ARS');
+  const activeIdRef = useRef(activeId);
+  const deletingSessionIdsRef = useRef(new Set<string>());
+  activeIdRef.current = activeId;
   const inputRef = useRef<HTMLInputElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const activeConversation =
@@ -713,9 +716,42 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     setError('');
     setHistoryOpen(false);
   };
+  const deleteConversation = async (id: string) => {
+    if (busy || !window.confirm('¿Eliminar este chat permanentemente?')) return;
+    const currentId = activeId;
+    deletingSessionIdsRef.current.add(id);
+    try {
+      await window.salesApi.ai.sessions.delete(id);
+      const remaining = conversations.filter((conversation) => conversation.id !== id);
+      if (id === currentId) {
+        if (remaining.length) {
+          setConversations(remaining);
+          setActiveId(remaining[0].id);
+        } else {
+          const fresh = firstConversation();
+          const persisted = await window.salesApi.ai.sessions.getOrCreate({
+            id: fresh.id,
+            title: fresh.title,
+          });
+          setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
+          setActiveId(persisted.id);
+        }
+      } else {
+        setConversations(remaining);
+      }
+      setQuestion('');
+      setError('');
+      setHistoryOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
+    } finally {
+      deletingSessionIdsRef.current.delete(id);
+    }
+  };
   const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => {
     const text = value.trim();
     if (!text || busy || !activeConversation) return;
+    const requestSessionId = activeConversation.id;
     const prior = messages.slice(-8).map((item) => ({ role: item.role, content: item.text }));
     const userMessage: Message = { role: 'user', text };
     setQuestion('');
@@ -731,6 +767,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
         role: 'user',
         text,
       });
+      if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.');
       return;
@@ -745,8 +782,9 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     setBusy(true);
     try {
       const answer = await window.salesApi.ai.analyze(text, prior, mode);
+      if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
       const savedAssistant = await window.salesApi.ai.sessions.append({
-        sessionId: activeConversation.id,
+        sessionId: requestSessionId,
         role: 'assistant',
         text: answer.text,
         period: answer.period,
@@ -754,6 +792,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
         metrics: answer.metrics,
         toolCall: answer.toolCall,
       });
+      if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
       updateActive((conversation) => ({
         ...conversation,
         title: savedAssistant.title || conversation.title,
@@ -828,22 +867,30 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
               </div>
               <div className="ai-history-list">
                 {conversations.map((conversation) => (
-                  <button
-                    type="button"
+                  <div
                     key={conversation.id}
                     className={`ai-history-item ${conversation.id === activeConversation?.id ? 'selected' : ''}`}
-                    onClick={() => selectConversation(conversation.id)}
                   >
-                    <strong>{conversation.title}</strong>
-                    <span>
-                      {conversation.messages.length}{' '}
-                      {conversation.messages.length === 1 ? 'mensaje' : 'mensajes'} ·{' '}
-                      {new Date(conversation.updatedAt).toLocaleTimeString('es-AR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </button>
+                    <button type="button" onClick={() => selectConversation(conversation.id)}>
+                      <strong>{conversation.title}</strong>
+                      <span>
+                        {conversation.messages.length}{' '}
+                        {conversation.messages.length === 1 ? 'mensaje' : 'mensajes'} ·{' '}
+                        {new Date(conversation.updatedAt).toLocaleTimeString('es-AR', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Eliminar chat ${conversation.title}`}
+                      onClick={() => void deleteConversation(conversation.id)}
+                      disabled={busy}
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 ))}
               </div>
             </aside>
@@ -996,6 +1043,9 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
   const [error, setError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [currency, setCurrency] = useState('ARS');
+  const activeIdRef = useRef(activeId);
+  const deletingSessionIdsRef = useRef(new Set<string>());
+  activeIdRef.current = activeId;
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
@@ -1052,6 +1102,38 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
     setConversations((previous) =>
       previous.map((item) => (item.id === active?.id ? update(item) : item)),
     );
+  const deleteConversation = async (id: string) => {
+    if (busy || !window.confirm('¿Eliminar este chat permanentemente?')) return;
+    const currentId = activeId;
+    deletingSessionIdsRef.current.add(id);
+    try {
+      await window.salesApi.ai.sessions.delete(id);
+      const remaining = conversations.filter((conversation) => conversation.id !== id);
+      if (id === currentId) {
+        if (remaining.length) {
+          setConversations(remaining);
+          setActiveId(remaining[0].id);
+        } else {
+          const fresh = makeConversation();
+          const persisted = await window.salesApi.ai.sessions.getOrCreate({
+            id: fresh.id,
+            title: fresh.title,
+          });
+          setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
+          setActiveId(persisted.id);
+        }
+      } else {
+        setConversations(remaining);
+      }
+      setQuestion('');
+      setError('');
+      setHistoryOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
+    } finally {
+      deletingSessionIdsRef.current.delete(id);
+    }
+  };
   const newChat = async () => {
     const conversation = makeConversation();
     try {
@@ -1068,6 +1150,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
   const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => {
     const text = value.trim();
     if (!text || busy || !active) return;
+    const requestSessionId = active.id;
     const prior = messages.slice(-8).map((item) => ({ role: item.role, content: item.text }));
     let persistedSession;
     try {
@@ -1080,6 +1163,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
         role: 'user',
         text,
       });
+      if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.');
       return;
@@ -1096,8 +1180,9 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
     setBusy(true);
     try {
       const answer = await window.salesApi.ai.analyze(text, prior, mode);
+      if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
       const savedAssistant = await window.salesApi.ai.sessions.append({
-        sessionId: active.id,
+        sessionId: requestSessionId,
         role: 'assistant',
         text: answer.text,
         period: answer.period,
@@ -1105,6 +1190,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
         metrics: answer.metrics,
         toolCall: answer.toolCall,
       });
+      if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
       updateActive((item) => ({
         ...item,
         title: savedAssistant.title || item.title,
@@ -1172,19 +1258,31 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
                 </button>
               </div>
               {conversations.map((item) => (
-                <button
-                  type="button"
+                <div
                   key={item.id}
                   className={`ai-history-item ${item.id === active?.id ? 'selected' : ''}`}
-                  onClick={() => {
-                    setActiveId(item.id);
-                    setHistoryOpen(false);
-                    setError('');
-                  }}
                 >
-                  {item.title}
-                  <small>{item.messages.length} mensajes</small>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveId(item.id);
+                      setHistoryOpen(false);
+                      setQuestion('');
+                      setError('');
+                    }}
+                  >
+                    {item.title}
+                    <small>{item.messages.length} mensajes</small>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Eliminar chat ${item.title}`}
+                    onClick={() => void deleteConversation(item.id)}
+                    disabled={busy}
+                  >
+                    Eliminar
+                  </button>
+                </div>
               ))}
             </aside>
           )}
