@@ -164,7 +164,7 @@ declare global {
         restore(): Promise<{ canceled: boolean; restored?: boolean }>;
         automaticStatus(): Promise<{
           directory: string;
-          retention: number;
+          retention: 1;
           lastAttemptAt: string | null;
           lastSuccessAt: string | null;
           lastError: string | null;

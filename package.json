@@ -10,6 +10,7 @@
     "build": "node scripts/merge-styles.cjs && node scripts/visual-polish.cjs && tsc && vite build && node scripts/fix-dist-paths.cjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "verify:automatic-backup": "node scripts/verify-automatic-backup.cjs",
     "format": "prettier --write --ignore-unknown \"src/**/*\" \"electron/**/*\" \"scripts/**/*\" package.json \"tsconfig*.json\" vite.config.ts",
     "format:check": "prettier --check --ignore-unknown \"src/**/*\" \"electron/**/*\" \"scripts/**/*\" package.json \"tsconfig*.json\" vite.config.ts",
     "dist": "npm run build && electron-builder --win",

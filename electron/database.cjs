@@ -8,8 +8,9 @@ const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
 const SCHEMA_VERSION = 6;
-const AUTOMATIC_BACKUP_RETENTION = 7;
+const AUTOMATIC_BACKUP_RETENTION = 1;
 const AUTOMATIC_BACKUP_PREFIX = 'pollo-caja-auto-';
+const AUTOMATIC_BACKUP_FILENAME = 'automatic-latest.sqlite';
 const OLLAMA_MODELS = [
   'gpt-oss:20b',
   'gpt-oss:120b',
@@ -377,13 +378,32 @@ function saveAutomaticBackupStatus(status) {
   getDatabase().transaction(() => entries.forEach(([key, value]) => save.run(key, value)))();
 }
 
+function isAutomaticArtifact(name) {
+  return (
+    (name.startsWith(AUTOMATIC_BACKUP_PREFIX) &&
+      (name.endsWith('.sqlite') || name.endsWith('.sqlite-wal') || name.endsWith('.sqlite-shm'))) ||
+    name === AUTOMATIC_BACKUP_FILENAME ||
+    name.startsWith(`${AUTOMATIC_BACKUP_FILENAME}.tmp-`) ||
+    name.startsWith(`${AUTOMATIC_BACKUP_FILENAME}.previous-`) ||
+    (name.startsWith(AUTOMATIC_BACKUP_PREFIX) &&
+      (name.includes('.tmp-') || name.includes('.previous-')))
+  );
+}
+
+function cleanAutomaticArtifacts(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || !isAutomaticArtifact(entry.name)) continue;
+    if (entry.name === AUTOMATIC_BACKUP_FILENAME) continue;
+    fs.rmSync(path.join(directory, entry.name), { force: true });
+  }
+}
+
 async function createAutomaticBackup(trigger = 'startup') {
   if (trigger !== 'startup' && trigger !== 'cash-close')
     throw new Error('El disparador de copia automática no es válido.');
   const attemptedAt = new Date().toISOString();
   const directory = getAutomaticBackupDirectory();
-  const businessDate = getBusinessDate();
-  const destination = path.join(directory, `${AUTOMATIC_BACKUP_PREFIX}${businessDate}.sqlite`);
+  const destination = path.join(directory, AUTOMATIC_BACKUP_FILENAME);
   const existing = getAutomaticBackupStatus();
   saveAutomaticBackupStatus({
     ...existing,
@@ -393,16 +413,33 @@ async function createAutomaticBackup(trigger = 'startup') {
   });
   try {
     fs.mkdirSync(directory, { recursive: true });
-    // One startup copy per local business day; a cash close may refresh today's copy.
-    if (!(trigger === 'startup' && fs.existsSync(destination)))
-      await backupDatabase(destination);
-    else validateDatabaseFile(destination);
-    const files = fs
-      .readdirSync(directory, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.startsWith(AUTOMATIC_BACKUP_PREFIX) && entry.name.endsWith('.sqlite'))
-      .map((entry) => ({ name: entry.name, path: path.join(directory, entry.name) }))
-      .sort((a, b) => b.name.localeCompare(a.name));
-    files.slice(AUTOMATIC_BACKUP_RETENTION).forEach((file) => fs.rmSync(file.path, { force: true }));
+    const database = getDatabase();
+    database.pragma('wal_checkpoint(TRUNCATE)');
+    const temporaryPath = `${destination}.tmp-${crypto.randomBytes(8).toString('hex')}`;
+    const previousPath = `${destination}.previous-${crypto.randomBytes(8).toString('hex')}`;
+    try {
+      await database.backup(temporaryPath);
+      removeDatabaseSidecars(temporaryPath);
+      // Validate before touching the existing automatic copy.
+      validateDatabaseFile(temporaryPath);
+      if (fs.existsSync(destination)) fs.renameSync(destination, previousPath);
+      try {
+        fs.renameSync(temporaryPath, destination);
+      } catch (error) {
+        if (fs.existsSync(previousPath)) fs.renameSync(previousPath, destination);
+        throw error;
+      }
+      removeDatabaseSidecars(destination);
+      if (fs.existsSync(previousPath)) fs.rmSync(previousPath, { force: true });
+    } finally {
+      if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
+      removeDatabaseSidecars(temporaryPath);
+      if (fs.existsSync(previousPath)) {
+        if (!fs.existsSync(destination)) fs.renameSync(previousPath, destination);
+        else fs.rmSync(previousPath, { force: true });
+      }
+    }
+    cleanAutomaticArtifacts(directory);
     const completedAt = new Date().toISOString();
     const result = {
       ...getAutomaticBackupStatus(),
@@ -416,6 +453,7 @@ async function createAutomaticBackup(trigger = 'startup') {
     recordAudit('database.automatic-backup', 'database', null, { trigger, fileName: path.basename(destination) });
     return result;
   } catch (error) {
+    if (fs.existsSync(directory)) cleanAutomaticArtifacts(directory);
     const failure = {
       ...getAutomaticBackupStatus(),
       lastAttemptAt: attemptedAt,

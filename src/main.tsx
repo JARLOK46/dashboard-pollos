@@ -102,7 +102,7 @@ type Page =
 type SettingsData = { businessName: string; currency: string; lowStockThreshold: number };
 type AutomaticBackupStatus = {
   directory: string;
-  retention: number;
+  retention: 1;
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;
   lastError: string | null;
@@ -3290,12 +3290,12 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
           <b className="status-label">● Operativa</b>
         </div>
         <div className="about-row">
-          <span>Copias automáticas</span>
+          <span>Copias automáticas (solo la última)</span>
           <b className={automaticBackup?.lastError ? 'form-error' : 'status-label'}>
             {automaticBackup?.lastError
               ? '● Error en la última copia'
               : automaticBackup?.lastSuccessAt
-                ? `● Última copia: ${new Date(automaticBackup.lastSuccessAt).toLocaleString('es-CO')}`
+                ? `● Última copia automática: ${new Date(automaticBackup.lastSuccessAt).toLocaleString('es-CO')}`
                 : '○ Aún no ejecutada'}
           </b>
         </div>
