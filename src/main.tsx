@@ -1867,7 +1867,7 @@ function Dashboard({
             <h2>Diagnóstico de datos</h2>
             <p>Revisiones determinísticas del estado de la operación</p>
           </div>
-          <button className="text-button" onClick={() => void loadDiagnostics()} disabled={diagnosticsState === 'loading'}>
+          <button className="text-button diagnostics-refresh" onClick={() => void loadDiagnostics()} disabled={diagnosticsState === 'loading'}>
             {diagnosticsState === 'loading' ? 'Actualizando…' : 'Actualizar ↻'}
           </button>
         </div>
@@ -1880,9 +1880,12 @@ function Dashboard({
           <div className="diagnostics-list">
             {diagnostics.slice(0, 4).map((issue) => (
               <button className="diagnostic-item" key={`${issue.issue_code}-${issue.entity_type}-${issue.entity_id ?? 'none'}`} onClick={() => navigate(issue.entity_type === 'product' ? 'products' : 'history')}>
-                <span className={`diagnostic-severity ${issue.severity}`}>{issue.severity}</span>
-                <span>{issue.message}</span>
-                <span aria-hidden="true">→</span>
+                <span className={`diagnostic-severity ${issue.severity}`} aria-label={`Estado ${issue.severity}`}>
+                  <span className="diagnostic-severity-dot" aria-hidden="true" />
+                  {issue.severity}
+                </span>
+                <span className="diagnostic-message">{issue.message}</span>
+                <span className="diagnostic-arrow" aria-hidden="true">→</span>
               </button>
             ))}
           </div>
@@ -2703,13 +2706,13 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
         <div className="checkout-search-header">
           <label className="checkout-search">
             <span className="search-label"><span className="search-icon" aria-hidden="true">⌕</span> Buscar producto</span>
-            <span className="search-shortcut" aria-hidden="true">Ctrl K</span>
+            <kbd className="search-shortcut" aria-hidden="true">Ctrl/Cmd K</kbd>
             <input
             ref={searchRef}
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Nombre o descripción · Ctrl + K"
+            placeholder="Nombre o descripción"
             aria-label="Buscar producto por nombre o descripción"
             />
           </label>
