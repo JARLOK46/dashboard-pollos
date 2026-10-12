@@ -345,20 +345,25 @@ function createWindow() {
     },
   });
   applicationWindows.add(window);
-  window.webContents.once('destroyed', () => {
-    authenticatedSenders.delete(window.webContents);
+  const webContents = window.webContents;
+  let cleanedUp = false;
+  const cleanupWindow = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    authenticatedSenders.delete(webContents);
     applicationWindows.delete(window);
-  });
-  window.on('closed', () => {
-    authenticatedSenders.delete(window.webContents);
-    applicationWindows.delete(window);
-  });
+  };
+  webContents.once('destroyed', cleanupWindow);
+  window.on('closed', cleanupWindow);
   if (isDev) window.loadURL('http://localhost:5173');
   else window.loadFile(path.join(__dirname, '../dist/index.html'));
 }
 
 function registerIpc() {
   const { ipcMain, dialog } = require('electron');
+  const currentActor = (event) => authenticatedSenders.get(event.sender)?.email || 'local-operator';
+  const audit = (event, action, entityType, entityId, metadata = {}) =>
+    database.recordAudit(action, entityType, entityId, metadata, currentActor(event));
   const protectedHandle = (channel, listener) =>
     ipcMain.handle(channel, (event, ...args) => {
       requireAuthenticatedSender(event);
@@ -376,23 +381,25 @@ function registerIpc() {
     (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false,
   );
   protectedHandle('products:list', () => database.listProducts());
-  protectedHandle('products:create', (_event, input) => database.createProduct(input));
-  protectedHandle('products:update', (_event, input) => database.updateProduct(input));
-  protectedHandle('products:archive', (_event, input) => database.archiveProduct(input));
-  protectedHandle('products:adjust-stock', (_event, input) => database.adjustProductStock(input));
+  protectedHandle('products:create', (event, input) => { const result = database.createProduct(input); audit(event, 'product.create', 'product', result.id, { name: result.name }); return result; });
+  protectedHandle('products:update', (event, input) => { const result = database.updateProduct(input); audit(event, 'product.update', 'product', result.id, { name: result.name }); return result; });
+  protectedHandle('products:archive', (event, input) => { const result = database.archiveProduct(input); audit(event, 'product.archive', 'product', result.id); return result; });
+  protectedHandle('products:adjust-stock', (event, input) => { const result = database.adjustProductStock(input); audit(event, 'inventory.adjust', 'product', result.id, { quantityDelta: input.quantityDelta, reason: input.reason }); return result; });
   protectedHandle('products:movements', (_event, productId, limit, filters) =>
     database.listInventoryMovements(productId, limit, filters),
   );
-  protectedHandle('sales:create', (_event, input) => database.createSale(input));
-  protectedHandle('sales:void', (_event, id, reason) => database.voidSale(id, reason));
+  protectedHandle('sales:create', (event, input) => { const result = database.createSale(input); audit(event, 'sale.create', 'sale', result.id, { paymentMethod: result.payment_method, totalCents: result.total_cents }); return result; });
+  protectedHandle('sales:void', (event, id, reason) => { const result = database.voidSale(id, reason); audit(event, 'sale.void', 'sale', id, { reason }); return result; });
   protectedHandle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
   protectedHandle('sales:analytics', (_event, filters) => database.getSalesAnalytics(filters));
   protectedHandle('sales:get', (_event, id) => database.getSale(id));
-  protectedHandle('expenses:create', (_event, input) => database.createExpense(input));
+  protectedHandle('expenses:create', (event, input) => { const result = database.createExpense(input); audit(event, 'expense.create', 'expense', result.id, { amountCents: result.amount_cents, category: result.category }); return result; });
   protectedHandle('expenses:list', (_event, limit) => database.listExpenses(limit));
-  protectedHandle('cash:withdraw', (_event, input) => database.createWithdrawal(input));
+  protectedHandle('cash:withdraw', (event, input) => { const result = database.createWithdrawal(input); audit(event, 'cash.withdrawal', 'cash_movement', result.id, { amountCents: input.amountCents }); return result; });
   protectedHandle('dashboard:summary', () => database.getDashboardSummary());
   protectedHandle('dashboard:alerts', () => database.getDashboardAlerts());
+  protectedHandle('diagnostics:list', () => database.getDiagnostics());
+  protectedHandle('database:automatic-status', () => database.getAutomaticBackupStatus());
   protectedHandle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
   protectedHandle('database:backup', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -415,7 +422,9 @@ function registerIpc() {
       });
       if (confirmation.response !== 1) return { canceled: true };
     }
-    return { canceled: false, ...(await database.backupDatabase(result.filePath)) };
+    const backup = await database.backupDatabase(result.filePath);
+    audit(event, 'database.backup', 'database', null, { filePath: result.filePath });
+    return { canceled: false, ...backup };
   });
   protectedHandle('database:restore', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -435,7 +444,9 @@ function registerIpc() {
       detail: 'Esta acción no se puede deshacer. Creá una copia antes de continuar.',
     });
     if (confirmation.response !== 1) return { canceled: true };
-    return { canceled: false, ...database.restoreDatabase(result.filePaths[0]) };
+    const restored = database.restoreDatabase(result.filePaths[0]);
+    database.recordAudit('database.restore', 'database', null, { sourcePath: result.filePaths[0] }, currentActor(event));
+    return { canceled: false, ...restored };
   });
   protectedHandle('report:export', async (_event, businessDate, format) => {
     const fs = require('node:fs/promises');
@@ -448,7 +459,7 @@ function registerIpc() {
     });
     if (result.canceled || !result.filePath) return { canceled: true };
     if (extension === 'xlsx')
-      XLSX.writeFile(buildWorkbook(report.sales, report.expenses, report), result.filePath);
+      XLSX.writeFile(buildWorkbook(report.sales, report.expenses, report, { products: database.listProducts(), cash: database.getCashRegister(), period: businessDate }), result.filePath);
     else {
       const rows = [
         ['Reporte diario', businessDate],
@@ -481,13 +492,23 @@ function registerIpc() {
         'utf8',
       );
     }
+    audit(_event, 'report.export', 'report', null, { businessDate, format: extension });
     return { canceled: false, filePath: result.filePath };
   });
-  protectedHandle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
+  protectedHandle('cash:open', (event, amountCents) => { const result = database.openCashRegister(amountCents); audit(event, 'cash.open', 'cash_register', result.id, { amountCents }); return result; });
   protectedHandle('cash:get', () => database.getCashRegister());
-  protectedHandle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
+  protectedHandle('cash:close', async (event, countedCents) => {
+    const result = database.closeCashRegister(countedCents);
+    audit(event, 'cash.close', 'cash_register', result.id, { countedCents, differenceCents: result.differenceCents });
+    try {
+      await database.createAutomaticBackup('cash-close');
+    } catch {
+      // Cash close is already committed; backup status/error is persisted for visibility.
+    }
+    return result;
+  });
   protectedHandle('settings:get', () => database.getSettings());
-  protectedHandle('settings:update', (_event, input) => database.updateSettings(input));
+  protectedHandle('settings:update', (event, input) => { const result = database.updateSettings(input); audit(event, 'settings.update', 'settings', null, { keys: ['businessName', 'currency', 'lowStockThreshold'] }); return result; });
   protectedHandle('ai:sessions:list', (_event, limit) => database.listAiSessions(limit));
   protectedHandle('ai:sessions:get', (_event, id) => database.getAiSession(id));
   protectedHandle('ai:sessions:delete', (_event, id) => database.deleteAiSession(id));
@@ -535,7 +556,7 @@ function registerIpc() {
   protectedHandle('auth:change-password', (_event, input) =>
     database.changeAdminPassword(input?.currentPassword, input?.newPassword),
   );
-  protectedHandle('export:data', async (_event, format) => {
+  protectedHandle('export:data', async (_event, format, filters = {}) => {
     const fs = require('node:fs/promises');
     const extension = format === 'csv' ? 'csv' : 'xlsx';
     const result = await dialog.showSaveDialog({
@@ -544,8 +565,14 @@ function registerIpc() {
       filters: [{ name: extension === 'csv' ? 'CSV' : 'Excel', extensions: [extension] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true };
-    const sales = database.listSales(10000);
-    const expenses = database.listExpenses(10000);
+    const safeFilters = {
+      from: typeof filters?.from === 'string' ? filters.from : undefined,
+      to: typeof filters?.to === 'string' ? filters.to : undefined,
+      paymentMethod: ['all', 'cash', 'card'].includes(filters?.paymentMethod) ? filters.paymentMethod : 'all',
+      status: ['all', 'active', 'voided'].includes(filters?.status) ? filters.status : 'active',
+    };
+    const sales = database.listSales(10000, safeFilters);
+    const expenses = database.listExpenses(10000, safeFilters);
     const rows = [
       ['Venta', 'Fecha', 'Productos', 'Total (COP)', 'Método de pago', 'Efectivo recibido (COP)', 'Vuelto (COP)'],
     ];
@@ -560,7 +587,7 @@ function registerIpc() {
         (sale.change_cents ),
       ]);
     if (format === 'xlsx') {
-      XLSX.writeFile(buildWorkbook(sales, expenses), result.filePath);
+      XLSX.writeFile(buildWorkbook(sales, expenses, null, { products: database.listProducts(), cash: database.getCashRegister(), period: `${safeFilters.from || 'Inicio'} – ${safeFilters.to || 'Hoy'}` }), result.filePath);
     } else {
       const escape = (value) => `"${String(value).replaceAll('"', '""')}"`;
       await fs.writeFile(
@@ -569,6 +596,7 @@ function registerIpc() {
         'utf8',
       );
     }
+    audit(_event, 'sales.export', 'export', null, { format: extension, filters: safeFilters });
     return { canceled: false, filePath: result.filePath };
   });
 }
@@ -576,6 +604,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   registerIpc();
   database.getDatabase();
+  void database.createAutomaticBackup('startup').catch(() => {});
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

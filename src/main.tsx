@@ -25,6 +25,8 @@ type SaleInput = {
   paymentMethod: 'cash' | 'card';
   amountReceivedCents: number;
   changeCents: number;
+  customerName?: string;
+  notes?: string;
   items: Array<{
     productId: number;
     productName: string;
@@ -98,6 +100,15 @@ type Page =
   | 'settings'
   | 'ai';
 type SettingsData = { businessName: string; currency: string; lowStockThreshold: number };
+type AutomaticBackupStatus = {
+  directory: string;
+  retention: number;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  lastPath: string | null;
+  lastTrigger: string | null;
+};
 const OLLAMA_MODELS = [
   { id: 'gpt-oss:20b', label: 'GPT OSS 20B' },
   { id: 'gpt-oss:120b', label: 'GPT OSS 120B' },
@@ -1745,11 +1756,47 @@ function Dashboard({
 }) {
   const [range, setRange] = useState(defaultRange);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [diagnostics, setDiagnostics] = useState<Awaited<ReturnType<typeof window.salesApi.diagnostics.list>>>([]);
+  const [diagnosticsState, setDiagnosticsState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const loadDiagnostics = async () => {
+    setDiagnosticsState('loading');
+    try {
+      setDiagnostics(await window.salesApi.diagnostics.list());
+      setDiagnosticsState('ready');
+    } catch {
+      setDiagnosticsState('error');
+    }
+  };
+  useEffect(() => {
+    void loadDiagnostics();
+  }, []);
   useEffect(() => {
     window.salesApi.sales.analytics(range).then(setAnalytics);
   }, [range.from, range.to]);
   const total = analytics?.totalCents ?? summary?.salesTodayCents ?? 0;
-  const max = Math.max(...(analytics?.byDay?.map((d: any) => d.total_cents) ?? [1]));
+  const chartData = (analytics?.byDay ?? []).map((day: any) => ({
+    day: String(day.day),
+    total: Number.isFinite(Number(day.total_cents)) ? Math.max(0, Number(day.total_cents)) : 0,
+  }));
+  const chartMax = Math.max(...chartData.map((day: { total: number }) => day.total), 0);
+  const chartPoints = chartData.map((day: { day: string; total: number }, index: number) => ({
+    ...day,
+    x: chartData.length === 1 ? 360 : 28 + (index * 664) / (chartData.length - 1),
+    y: chartMax > 0 ? 178 - (day.total / chartMax) * 142 : 178,
+  }));
+  const chartPath = chartPoints.reduce((path: string, point: { x: number; y: number }, index: number, points: Array<{ x: number; y: number }>) => {
+    if (index === 0) return `M ${point.x} ${point.y}`;
+    const previous = points[index - 1];
+    const midpoint = (previous.x + point.x) / 2;
+    return `${path} C ${midpoint} ${previous.y}, ${midpoint} ${point.y}, ${point.x} ${point.y}`;
+  }, '');
+  const bestSellers = sales
+    .flatMap((sale) => sale.items)
+    .reduce<Record<string, number>>((counts, item) => {
+      counts[item.product_name] = (counts[item.product_name] ?? 0) + item.quantity;
+      return counts;
+    }, {});
+  const rankedProducts = Object.entries(bestSellers).sort(([, a], [, b]) => b - a).slice(0, 4);
   return (
     <>
       <div className="analytics-toolbar">
@@ -1814,6 +1861,33 @@ function Dashboard({
           tone="red"
         />
       </section>
+      <section className="panel diagnostics-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Diagnóstico de datos</h2>
+            <p>Revisiones determinísticas del estado de la operación</p>
+          </div>
+          <button className="text-button" onClick={() => void loadDiagnostics()} disabled={diagnosticsState === 'loading'}>
+            {diagnosticsState === 'loading' ? 'Actualizando…' : 'Actualizar ↻'}
+          </button>
+        </div>
+        {diagnosticsState === 'loading' && <p className="muted">Consultando diagnóstico…</p>}
+        {diagnosticsState === 'error' && (
+          <p className="form-error" role="alert">No se pudo cargar el diagnóstico. Intentá actualizar.</p>
+        )}
+        {diagnosticsState === 'ready' && !diagnostics.length && <p className="success-message">No se detectaron problemas.</p>}
+        {diagnosticsState === 'ready' && diagnostics.length > 0 && (
+          <div className="diagnostics-list">
+            {diagnostics.slice(0, 4).map((issue) => (
+              <button className="diagnostic-item" key={`${issue.issue_code}-${issue.entity_type}-${issue.entity_id ?? 'none'}`} onClick={() => navigate(issue.entity_type === 'product' ? 'products' : 'history')}>
+                <span className={`diagnostic-severity ${issue.severity}`}>{issue.severity}</span>
+                <span>{issue.message}</span>
+                <span aria-hidden="true">→</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
       <div className="content-grid">
         <section className="panel sales-panel">
           <div className="panel-heading">
@@ -1830,9 +1904,15 @@ function Dashboard({
         <section className="panel quick-panel">
           <div className="panel-heading">
             <div>
-              <h2>Acciones rápidas</h2>
-              <p>Lo que más usás</p>
+              <h2>Más vendidos</h2>
+              <p>Según las ventas cargadas</p>
             </div>
+          </div>
+          {rankedProducts.length ? rankedProducts.map(([name, quantity]) => (
+            <div className="best-seller-row" key={name}><strong>{name}</strong><span>{quantity} vendidos</span></div>
+          )) : <p className="muted">Todavía no hay ventas para ordenar.</p>}
+          <div className="panel-heading quick-heading">
+            <div><h2>Acciones rápidas</h2><p>Lo que más usás</p></div>
           </div>
           <button className="quick-action primary" onClick={() => navigate('checkout')}>
             <span className="action-icon">＋</span>
@@ -1860,19 +1940,35 @@ function Dashboard({
               <p>Las ventas aparecerán aquí al registrar operaciones.</p>
             </div>
           </div>
-          <div className="sales-bars">
-            {(analytics?.byDay ?? []).map((day: any) => (
-              <div className="bar-column" key={day.day}>
-                <span>{money(day.total_cents)}</span>
-                <i style={{ height: `${Math.max(8, (day.total_cents / max) * 145)}px` }} />
-                <small>
-                  {new Date(`${day.day}T12:00:00`)
-                    .toLocaleDateString('es-AR', { weekday: 'short' })
-                    .replace('.', '')}
-                </small>
-              </div>
-            ))}
-          </div>
+          {chartPoints.length === 0 ? (
+            <div className="empty-chart" role="status">
+              <span aria-hidden="true">⌁</span>
+              <strong>Sin ventas en este período</strong>
+              <small>Probá ampliar las fechas para ver la tendencia.</small>
+            </div>
+          ) : (
+            <div className="sales-chart-wrap">
+              <svg className="sales-chart" viewBox="0 0 720 220" role="img" aria-label="Ventas por día en pesos colombianos">
+                <g className="chart-grid" aria-hidden="true">
+                  {[0, 1, 2, 3].map((step) => {
+                    const y = 36 + step * 47;
+                    return <line key={step} x1="28" x2="692" y1={y} y2={y} />;
+                  })}
+                </g>
+                <path className="chart-line" d={chartPath} />
+                {chartPoints.map((point: { day: string; total: number; x: number; y: number }) => (
+                  <g className="chart-point" key={point.day}>
+                    <title>{`${point.day}: ${money(point.total)}`}</title>
+                    <circle cx={point.x} cy={point.y} r="4" />
+                    <text x={point.x} y={Math.max(18, point.y - 11)} textAnchor="middle">{money(point.total)}</text>
+                    <text className="chart-day-label" x={point.x} y="207" textAnchor="middle">
+                      {new Date(`${point.day}T12:00:00`).toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
+                    </text>
+                  </g>
+                ))}
+              </svg>
+            </div>
+          )}
         </div>
         <div className="panel stock-panel">
           <div className="panel-heading">
@@ -2534,23 +2630,51 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
   const [cart, setCart] = useState<Record<number, number>>({});
   const [payment, setPayment] = useState<'cash' | 'card'>('cash');
   const [received, setReceived] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [notes, setNotes] = useState('');
+  const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const selected = products.filter((p) => cart[p.id]);
   const total = selected.reduce((sum, p) => sum + p.price_cents * (cart[p.id] || 0), 0);
   const change = Math.max(0, Math.round(Number(received || 0)) - total);
   const add = (p: Product, delta: number) =>
     setCart((c) => ({ ...c, [p.id]: Math.max(0, Math.min(p.stock, (c[p.id] || 0) + delta)) }));
+  const filteredProducts = products.filter((p) =>
+    `${p.name} ${p.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  );
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchRef.current?.focus();
+      } else if (event.key === 'Escape' && document.activeElement === searchRef.current) {
+        setSearch('');
+        searchRef.current?.blur();
+      } else if (event.key === 'Enter' && document.activeElement === searchRef.current && filteredProducts.length === 1) {
+        event.preventDefault();
+        if (filteredProducts[0].stock) add(filteredProducts[0], 1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [filteredProducts]);
   const submit = async () => {
+    if (busy) return;
     setError('');
     if (!selected.length) return setError('Agregá al menos un producto.');
     if (payment === 'cash' && Number(received) < total)
       return setError('El efectivo recibido no alcanza para cubrir el total.');
+    setBusy(true);
     try {
-      await window.salesApi.sales.create({
+      const input: SaleInput = {
         totalCents: total,
         paymentMethod: payment,
         amountReceivedCents: payment === 'cash' ? Number(received) : total,
         changeCents: payment === 'cash' ? change : 0,
+        customerName: customerName.trim() || undefined,
+        notes: notes.trim() || undefined,
         items: selected.map((p) => ({
           productId: p.id,
           productName: p.name,
@@ -2558,10 +2682,13 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
           unitPriceCents: p.price_cents,
           subtotalCents: p.price_cents * cart[p.id],
         })),
-      });
+      };
+      await window.salesApi.sales.create(input);
       await onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar la venta.');
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -2573,8 +2700,25 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
             <p>Hacé clic en agregar para sumarlos a la venta.</p>
           </div>
         </div>
+        <div className="checkout-search-header">
+          <label className="checkout-search">
+            <span className="search-label"><span className="search-icon" aria-hidden="true">⌕</span> Buscar producto</span>
+            <span className="search-shortcut" aria-hidden="true">Ctrl K</span>
+            <input
+            ref={searchRef}
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Nombre o descripción · Ctrl + K"
+            aria-label="Buscar producto por nombre o descripción"
+            />
+          </label>
+          <span className="search-results" aria-live="polite">
+            {filteredProducts.length} resultados · {filteredProducts.filter((product) => product.stock > 0).length} disponibles
+          </span>
+        </div>
         <div className="picker-grid">
-          {products.map((p) => (
+          {filteredProducts.map((p) => (
             <button
               className="picker-card"
               key={p.id}
@@ -2590,6 +2734,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
             </button>
           ))}
         </div>
+        {!filteredProducts.length && <div className="empty-state">No hay productos que coincidan con la búsqueda.</div>}
       </section>
       <section className="panel cart-panel">
         <div className="panel-heading">
@@ -2598,6 +2743,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
             <p>{selected.length} productos seleccionados</p>
           </div>
         </div>
+        <div className="checkout-section-label">Productos seleccionados <span>{selected.length}</span></div>
         {selected.map((p) => (
           <div className="cart-row" key={p.id}>
             <div>
@@ -2614,9 +2760,10 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
         ))}
         {!selected.length && <div className="empty-state">Seleccioná productos para comenzar.</div>}
         <div className="checkout-total">
-          <span>Total</span>
+          <span>Total de la venta</span>
           <strong>{money(total)}</strong>
         </div>
+        <div className="checkout-section-label">Medio de pago</div>
         <div className="payment-tabs">
           <button
             className={payment === 'cash' ? 'selected' : ''}
@@ -2631,7 +2778,20 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
             💳 Tarjeta
           </button>
         </div>
+        <div className="checkout-section-label">Cliente y notas</div>
+        <div className="checkout-extra-fields">
+          <label>
+            Cliente (opcional)
+            <input maxLength={120} value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Nombre del cliente" />
+          </label>
+          <label>
+            Notas (opcional)
+            <textarea maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Indicaciones para la venta" rows={2} />
+          </label>
+        </div>
         {payment === 'cash' && (
+          <div className="checkout-cash-section">
+          <div className="checkout-section-label">Efectivo y vuelto</div>
           <label className="cash-input">
             Efectivo recibido
             <input
@@ -2640,7 +2800,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
               step="1"
               value={received}
               onChange={(e) => setReceived(e.target.value)}
-              placeholder="0,00"
+              placeholder="Ej. 50000"
             />
             {Number(received) > 0 && (
               <b className={change >= 0 ? 'change-ok' : 'change-error'}>
@@ -2648,10 +2808,12 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
               </b>
             )}
           </label>
+          </div>
         )}
         {error && <p className="form-error">{error}</p>}
-        <button className="primary-button full-button" disabled={!selected.length} onClick={submit}>
-          Confirmar venta
+        <div className="checkout-section-label">Confirmación</div>
+        <button className="primary-button full-button" disabled={!selected.length || busy} onClick={() => void submit()}>
+          {busy ? 'Guardando venta…' : 'Confirmar venta'}
         </button>
       </section>
     </div>
@@ -2805,7 +2967,7 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
                   required
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0,00"
+                  placeholder="Ej. 25000"
                 />
               </label>
               <button className="primary-button">
@@ -2834,7 +2996,7 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
                   required
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0,00"
+                  placeholder="Ej. 25000"
                 />
               </label>
               <label>
@@ -2895,7 +3057,11 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
   const [newPassword, setNewPassword] = useState('');
   const [message, setMessage] = useState('');
   const [backupBusy, setBackupBusy] = useState(false);
+  const [automaticBackup, setAutomaticBackup] = useState<AutomaticBackupStatus | null>(null);
   useEffect(() => setForm(settings), [settings]);
+  useEffect(() => {
+    window.salesApi.database.automaticStatus().then(setAutomaticBackup).catch(() => undefined);
+  }, []);
   useEffect(() => {
     window.salesApi.ai.getConfig().then(setAiConfig);
   }, []);
@@ -2958,7 +3124,10 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
     setBackupBusy(true);
     try {
       const result = await window.salesApi.database.backup();
-      if (!result.canceled) setMessage(`Copia guardada en ${result.filePath}`);
+      if (!result.canceled) {
+        setMessage(`Copia guardada en ${result.filePath}`);
+        setAutomaticBackup(await window.salesApi.database.automaticStatus());
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo crear la copia.');
     } finally {
@@ -3118,6 +3287,19 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
           <b className="status-label">● Operativa</b>
         </div>
         <div className="about-row">
+          <span>Copias automáticas</span>
+          <b className={automaticBackup?.lastError ? 'form-error' : 'status-label'}>
+            {automaticBackup?.lastError
+              ? '● Error en la última copia'
+              : automaticBackup?.lastSuccessAt
+                ? `● Última copia: ${new Date(automaticBackup.lastSuccessAt).toLocaleString('es-CO')}`
+                : '○ Aún no ejecutada'}
+          </b>
+        </div>
+        {automaticBackup?.lastError && (
+          <p className="form-error">{automaticBackup.lastError}</p>
+        )}
+        <div className="about-row">
           <span>Copias de seguridad</span>
           <div className="export-actions">
             <button
@@ -3145,16 +3327,17 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
 function History({ sales, onVoided }: { sales: Sale[]; onVoided: () => Promise<void> }) {
   const [message, setMessage] = useState('');
   const [range, setRange] = useState(defaultRange);
-  const [payment, setPayment] = useState('all');
+  const [payment, setPayment] = useState<'all' | 'cash' | 'card'>('all');
+  const [status, setStatus] = useState<'all' | 'active' | 'voided'>('active');
   const [filtered, setFiltered] = useState<Sale[]>(sales);
   const [selected, setSelected] = useState<Sale | null>(null);
   useEffect(() => {
     window.salesApi.sales
-      .list(10000, { ...range, paymentMethod: payment })
+      .list(10000, { ...range, paymentMethod: payment, status })
       .then((result) => setFiltered(result as Sale[]));
-  }, [range.from, range.to, payment, sales.length]);
+  }, [range.from, range.to, payment, status, sales.length]);
   const exportData = async (format: 'csv' | 'xlsx') => {
-    const result = await window.salesApi.export(format);
+    const result = await window.salesApi.export(format, { ...range, paymentMethod: payment, status });
     if (!result.canceled) setMessage(`Archivo guardado en ${result.filePath}`);
   };
   const total = filtered.reduce((sum, sale) => sum + sale.total_cents, 0);
@@ -3187,10 +3370,18 @@ function History({ sales, onVoided }: { sales: Sale[]; onVoided: () => Promise<v
         </label>
         <label>
           Pago
-          <select value={payment} onChange={(e) => setPayment(e.target.value)}>
+          <select value={payment} onChange={(e) => setPayment(e.target.value as 'all' | 'cash' | 'card')}>
             <option value="all">Todos los medios</option>
             <option value="cash">Efectivo</option>
             <option value="card">Tarjeta</option>
+          </select>
+        </label>
+        <label>
+          Estado
+          <select value={status} onChange={(e) => setStatus(e.target.value as 'all' | 'active' | 'voided')}>
+            <option value="active">Activas</option>
+            <option value="voided">Anuladas</option>
+            <option value="all">Todos los estados</option>
           </select>
         </label>
       </div>
@@ -3517,22 +3708,37 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('insumos');
+  const [error, setError] = useState('');
   const load = async () => setExpenses(await window.salesApi.expenses.list(100));
   useEffect(() => {
     load();
   }, []);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description || Number(amount) <= 0) return;
-    await window.salesApi.expenses.create({
-      description,
-      amountCents: Number(amount),
-      category,
-    });
-    setDescription('');
-    setAmount('');
-    await load();
-    await onChanged();
+    setError('');
+    const amountCents = Number(amount);
+    if (!description.trim()) {
+      setError('Ingresá una descripción para el gasto.');
+      return;
+    }
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+      setError('El monto debe ser un número entero positivo de pesos COP.');
+      return;
+    }
+    try {
+      await window.salesApi.expenses.create({ description: description.trim(), amountCents, category });
+      setDescription('');
+      setAmount('');
+      await load();
+      await onChanged();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'No se pudo guardar el gasto.';
+      setError(
+        message.includes('caja')
+          ? `${message} Abrila desde Control de caja y volvé a intentar.`
+          : message,
+      );
+    }
   };
   return (
     <div className="expenses-layout">
@@ -3563,7 +3769,7 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
                 step="1"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="0,00"
+                placeholder="Ej. 25000"
               />
             </label>
             <label>
@@ -3576,6 +3782,7 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
               </select>
             </label>
           </div>
+          {error && <p className="form-error" role="alert">{error}</p>}
           <button className="primary-button">Guardar gasto</button>
         </form>
       </section>

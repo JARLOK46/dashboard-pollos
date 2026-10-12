@@ -7,7 +7,9 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
+const AUTOMATIC_BACKUP_RETENTION = 7;
+const AUTOMATIC_BACKUP_PREFIX = 'pollo-caja-auto-';
 const OLLAMA_MODELS = [
   'gpt-oss:20b',
   'gpt-oss:120b',
@@ -29,6 +31,7 @@ const REQUIRED_TABLES = [
   'inventory_movements',
   'ai_sessions',
   'ai_messages',
+  'audit_logs',
 ];
 
 let db;
@@ -168,6 +171,15 @@ function migrate(database) {
       tool_error TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('businessName', 'Pollo & Caja'),
       ('currency', 'COP'),
@@ -176,6 +188,8 @@ function migrate(database) {
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
     CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created ON inventory_movements(product_id, datetime(created_at) DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_ai_messages_session_created ON ai_messages(session_id, id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(datetime(created_at), id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
   `);
   const productColumns = database
     .prepare('PRAGMA table_info(products)')
@@ -308,12 +322,109 @@ async function backupDatabase(destination) {
       throw error;
     }
     removeDatabaseSidecars(destination);
+    try {
+      validateDatabaseFile(destination);
+    } catch (error) {
+      if (fs.existsSync(destination)) fs.rmSync(destination, { force: true });
+      removeDatabaseSidecars(destination);
+      if (fs.existsSync(previousPath)) fs.renameSync(previousPath, destination);
+      throw error;
+    }
     if (fs.existsSync(previousPath)) fs.rmSync(previousPath, { force: true });
     return { filePath: destination };
   } finally {
     if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
     removeDatabaseSidecars(temporaryPath);
     if (fs.existsSync(previousPath)) fs.rmSync(previousPath, { force: true });
+  }
+}
+
+function getAutomaticBackupDirectory() {
+  // Automatic backups intentionally stay under Electron's private userData directory;
+  // no user-configurable path exists in the current settings architecture.
+  return path.join(app.getPath('userData'), 'backups');
+}
+
+function getAutomaticBackupStatus() {
+  const values = Object.fromEntries(
+    getDatabase()
+      .prepare("SELECT key, value FROM settings WHERE key LIKE 'backup.%'")
+      .all()
+      .map((row) => [row.key, row.value]),
+  );
+  return {
+    directory: getAutomaticBackupDirectory(),
+    retention: AUTOMATIC_BACKUP_RETENTION,
+    lastAttemptAt: values['backup.lastAttemptAt'] || null,
+    lastSuccessAt: values['backup.lastSuccessAt'] || null,
+    lastError: values['backup.lastError'] || null,
+    lastPath: values['backup.lastPath'] || null,
+    lastTrigger: values['backup.lastTrigger'] || null,
+  };
+}
+
+function saveAutomaticBackupStatus(status) {
+  const save = getDatabase().prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  );
+  const entries = [
+    ['backup.lastAttemptAt', status.lastAttemptAt || ''],
+    ['backup.lastSuccessAt', status.lastSuccessAt || ''],
+    ['backup.lastError', status.lastError || ''],
+    ['backup.lastPath', status.lastPath || ''],
+    ['backup.lastTrigger', status.lastTrigger || ''],
+  ];
+  getDatabase().transaction(() => entries.forEach(([key, value]) => save.run(key, value)))();
+}
+
+async function createAutomaticBackup(trigger = 'startup') {
+  if (trigger !== 'startup' && trigger !== 'cash-close')
+    throw new Error('El disparador de copia automática no es válido.');
+  const attemptedAt = new Date().toISOString();
+  const directory = getAutomaticBackupDirectory();
+  const businessDate = getBusinessDate();
+  const destination = path.join(directory, `${AUTOMATIC_BACKUP_PREFIX}${businessDate}.sqlite`);
+  const existing = getAutomaticBackupStatus();
+  saveAutomaticBackupStatus({
+    ...existing,
+    lastAttemptAt: attemptedAt,
+    lastError: '',
+    lastTrigger: trigger,
+  });
+  try {
+    fs.mkdirSync(directory, { recursive: true });
+    // One startup copy per local business day; a cash close may refresh today's copy.
+    if (!(trigger === 'startup' && fs.existsSync(destination)))
+      await backupDatabase(destination);
+    else validateDatabaseFile(destination);
+    const files = fs
+      .readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.startsWith(AUTOMATIC_BACKUP_PREFIX) && entry.name.endsWith('.sqlite'))
+      .map((entry) => ({ name: entry.name, path: path.join(directory, entry.name) }))
+      .sort((a, b) => b.name.localeCompare(a.name));
+    files.slice(AUTOMATIC_BACKUP_RETENTION).forEach((file) => fs.rmSync(file.path, { force: true }));
+    const completedAt = new Date().toISOString();
+    const result = {
+      ...getAutomaticBackupStatus(),
+      lastAttemptAt: attemptedAt,
+      lastSuccessAt: completedAt,
+      lastError: '',
+      lastPath: destination,
+      lastTrigger: trigger,
+    };
+    saveAutomaticBackupStatus(result);
+    recordAudit('database.automatic-backup', 'database', null, { trigger, fileName: path.basename(destination) });
+    return result;
+  } catch (error) {
+    const failure = {
+      ...getAutomaticBackupStatus(),
+      lastAttemptAt: attemptedAt,
+      lastError: error instanceof Error ? error.message : String(error),
+      lastTrigger: trigger,
+    };
+    saveAutomaticBackupStatus(failure);
+    recordAudit('database.automatic-backup-failed', 'database', null, { trigger, error: failure.lastError });
+    throw error;
   }
 }
 
@@ -744,8 +855,12 @@ function listSales(limit = 100, filters = {}) {
     conditions.push('s.payment_method = ?');
     params.push(filters.paymentMethod);
   }
-  conditions.unshift("s.status = 'active'");
-  const where = `WHERE ${conditions.join(' AND ')}`;
+  const status = filters.status === 'all' ? null : filters.status || 'active';
+  if (status === 'active' || status === 'voided') {
+    conditions.unshift('s.status = ?');
+    params.unshift(status);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return database
     .prepare(`SELECT s.* FROM sales s ${where} ORDER BY datetime(s.created_at) DESC LIMIT ?`)
     .all(...params, limit)
@@ -791,6 +906,8 @@ function getSalesAnalytics(filters = {}) {
   };
 }
 
+// Legacy *_cents names are retained for API/DB compatibility; values are whole COP pesos.
+// Do not convert monetary values by dividing or multiplying by 100.
 function createExpense(input) {
   const database = getDatabase();
   if (
@@ -846,10 +963,21 @@ function createWithdrawal(input) {
   return database.prepare('SELECT * FROM cash_movements WHERE id = ?').get(result.lastInsertRowid);
 }
 
-function listExpenses(limit = 100) {
+function listExpenses(limit = 100, filters = {}) {
+  const conditions = [];
+  const params = [];
+  if (filters.from) {
+    conditions.push("date(created_at, 'localtime') >= date(?)");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    conditions.push("date(created_at, 'localtime') <= date(?)");
+    params.push(filters.to);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return getDatabase()
-    .prepare('SELECT * FROM expenses ORDER BY datetime(created_at) DESC LIMIT ?')
-    .all(limit);
+    .prepare(`SELECT * FROM expenses ${where} ORDER BY datetime(created_at) DESC LIMIT ?`)
+    .all(...params, limit);
 }
 function getOpenCashRegister(database = getDatabase()) {
   const register = database
@@ -1340,6 +1468,41 @@ function getDashboardAlerts() {
   return alerts.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
+function normalizeAuditActor(actorEmail) {
+  return typeof actorEmail === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(actorEmail.trim())
+    ? actorEmail.trim().toLowerCase()
+    : 'local-operator';
+}
+
+function recordAudit(action, entityType, entityId = null, metadata = {}, actorEmail) {
+  if (typeof action !== 'string' || !action.trim()) throw new Error('La acción de auditoría no es válida.');
+  if (typeof entityType !== 'string' || !entityType.trim()) throw new Error('La entidad de auditoría no es válida.');
+  const safeMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+  getDatabase().prepare(
+    'INSERT INTO audit_logs (actor_email, action, entity_type, entity_id, metadata_json) VALUES (?, ?, ?, ?, ?)',
+  ).run(normalizeAuditActor(actorEmail), action.trim(), entityType.trim(), Number.isInteger(entityId) ? entityId : null, JSON.stringify(safeMetadata));
+  return { recorded: true };
+}
+
+function getDiagnostics() {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT issue_code, severity, entity_type, entity_id, message FROM (
+      SELECT 'sale-total-item-mismatch' issue_code, 'critical' severity, 'sale' entity_type, s.id entity_id, 'El total de la venta no coincide con sus artículos.' message
+      FROM sales s LEFT JOIN sale_items i ON i.sale_id = s.id WHERE s.total_cents <> COALESCE((SELECT SUM(subtotal_cents) FROM sale_items WHERE sale_id = s.id), 0)
+      UNION ALL SELECT 'sale-cash-movement-missing', 'warning', 'sale', s.id, 'Venta en efectivo sin movimiento de caja esperado.' FROM sales s WHERE s.status = 'active' AND s.payment_method = 'cash' AND NOT EXISTS (SELECT 1 FROM cash_movements m WHERE m.type = 'sale' AND m.reference_id = s.id)
+      UNION ALL SELECT 'negative-stock', 'critical', 'product', p.id, 'El stock del producto es negativo.' FROM products p WHERE p.stock < 0
+      UNION ALL SELECT 'orphan-cash-movement', 'warning', 'cash_movement', m.id, 'Movimiento de caja sin registro relacionado.' FROM cash_movements m LEFT JOIN cash_registers r ON r.id = m.register_id WHERE m.register_id IS NULL OR r.id IS NULL
+      UNION ALL SELECT 'orphan-inventory-movement', 'warning', 'inventory_movement', m.id, 'Movimiento de inventario sin producto o referencia válida.' FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id WHERE p.id IS NULL OR (m.reference_type = 'sale' AND NOT EXISTS (SELECT 1 FROM sales s WHERE s.id = m.reference_id))
+      UNION ALL SELECT 'invalid-margin', 'warning', 'product', p.id, 'El costo del producto supera su precio.' FROM products p WHERE p.price_cents <= 0 OR p.cost_cents > p.price_cents
+      UNION ALL SELECT 'product-without-cost', 'info', 'product', p.id, 'El producto no tiene costo registrado.' FROM products p WHERE p.active = 1 AND p.cost_cents = 0
+      UNION ALL SELECT 'stale-open-register', 'warning', 'cash_register', r.id, 'La caja permanece abierta desde un día anterior.' FROM cash_registers r WHERE r.status = 'open' AND r.business_date < date('now', 'localtime')
+      UNION ALL SELECT 'duplicate-expense', 'warning', 'expense', e.id, 'Existe otro gasto idéntico registrado en la misma fecha.' FROM expenses e WHERE EXISTS (SELECT 1 FROM expenses d WHERE d.id < e.id AND d.description = e.description AND d.amount_cents = e.amount_cents AND date(d.created_at, 'localtime') = date(e.created_at, 'localtime'))
+      UNION ALL SELECT 'inventory-replay-incoherence', 'critical', 'inventory_movement', m.id, 'La secuencia de inventario no coincide con stock_before.' FROM inventory_movements m WHERE m.stock_after <> m.stock_before + m.quantity_delta OR ((SELECT COUNT(*) FROM inventory_movements x WHERE x.product_id = m.product_id AND (datetime(x.created_at) < datetime(m.created_at) OR (x.created_at = m.created_at AND x.id < m.id))) > 0 AND m.stock_before <> (SELECT x.stock_after FROM inventory_movements x WHERE x.product_id = m.product_id AND (datetime(x.created_at) < datetime(m.created_at) OR (x.created_at = m.created_at AND x.id < m.id)) ORDER BY datetime(x.created_at) DESC, x.id DESC LIMIT 1))
+    ) ORDER BY issue_code, entity_type, entity_id
+  `).all();
+}
+
 module.exports = {
   getDatabase,
   getBusinessDate,
@@ -1381,4 +1544,8 @@ module.exports = {
   closeCashRegister,
   backupDatabase,
   restoreDatabase,
+  getAutomaticBackupStatus,
+  createAutomaticBackup,
+  recordAudit,
+  getDiagnostics,
 };

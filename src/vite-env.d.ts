@@ -22,6 +22,8 @@ type DailyReport = {
   sales: unknown[];
 };
 
+type AiToolStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'cancelled';
+
 type AiToolCall =
   | {
       name: 'create_expense';
@@ -106,7 +108,7 @@ declare global {
           }>;
         }): Promise<unknown>;
         void(id: number, reason: string): Promise<unknown>;
-        list(limit?: number, filters?: unknown): Promise<unknown[]>;
+        list(limit?: number, filters?: { from?: string; to?: string; paymentMethod?: 'all' | 'cash' | 'card'; status?: 'all' | 'active' | 'voided' }): Promise<unknown[]>;
         analytics(filters: unknown): Promise<{
           totalCents: number;
           costCents: number;
@@ -138,6 +140,17 @@ declare global {
           }>
         >;
       };
+      diagnostics: {
+        list(): Promise<
+          Array<{
+            issue_code: string;
+            severity: 'critical' | 'warning' | 'info';
+            entity_type: string;
+            entity_id: number | null;
+            message: string;
+          }>
+        >;
+      };
       report: {
         daily(businessDate: string): Promise<DailyReport>;
         export(
@@ -145,10 +158,19 @@ declare global {
           format: 'csv' | 'xlsx',
         ): Promise<{ canceled: boolean; filePath?: string }>;
       };
-      export(format: 'csv' | 'xlsx'): Promise<{ canceled: boolean; filePath?: string }>;
+      export(format: 'csv' | 'xlsx', filters?: { from?: string; to?: string; paymentMethod?: 'all' | 'cash' | 'card'; status?: 'all' | 'active' | 'voided' }): Promise<{ canceled: boolean; filePath?: string }>;
       database: {
         backup(): Promise<{ canceled: boolean; filePath?: string }>;
         restore(): Promise<{ canceled: boolean; restored?: boolean }>;
+        automaticStatus(): Promise<{
+          directory: string;
+          retention: number;
+          lastAttemptAt: string | null;
+          lastSuccessAt: string | null;
+          lastError: string | null;
+          lastPath: string | null;
+          lastTrigger: string | null;
+        }>;
       };
       window: {
         minimize(): void;
@@ -185,12 +207,15 @@ declare global {
             created_at: string;
             updated_at: string;
             messages: Array<{
+              id: number;
               role: 'user' | 'assistant';
               text: string;
               period?: string | null;
               source?: string | null;
               metrics?: Array<{ label: string; value: string; detail?: string }>;
               toolCall?: AiToolCall | null;
+              toolStatus?: AiToolStatus;
+              toolError?: string | null;
             }>;
           } | null>;
           create(input: { id: string; title: string }): Promise<unknown>;
@@ -202,6 +227,20 @@ declare global {
             updated_at: string;
             messages: Array<{ role: 'user' | 'assistant'; text: string }>;
           }>;
+          claim(input: {
+            sessionId: string;
+            messageId: number;
+          }): Promise<{ claimed: boolean; status: AiToolStatus }>;
+          complete(input: {
+            sessionId: string;
+            messageId: number;
+            status: 'completed' | 'failed';
+            error?: string | null;
+          }): Promise<{ messageId: number; status: AiToolStatus; error: string | null }>;
+          cancel(input: {
+            sessionId: string;
+            messageId: number;
+          }): Promise<{ cancelled: boolean; status: AiToolStatus }>;
           append(input: {
             sessionId: string;
             role: 'user' | 'assistant';
@@ -230,7 +269,10 @@ declare global {
           toolCall?: AiToolCall | null;
         }>;
       };
-      auth: { login(input: { email: string; password: string }): Promise<boolean> };
+      auth: {
+        login(input: { email: string; password: string }): Promise<boolean>;
+        logout(): Promise<{ loggedOut: boolean }>;
+      };
       cash: {
         open(amountCents: number): Promise<unknown>;
         get(): Promise<{

@@ -25,14 +25,18 @@ contextBridge.exposeInMainWorld('salesApi', {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
     alerts: () => ipcRenderer.invoke('dashboard:alerts'),
   },
+  diagnostics: {
+    list: () => ipcRenderer.invoke('diagnostics:list'),
+  },
   report: {
     daily: (businessDate) => ipcRenderer.invoke('report:daily', businessDate),
     export: (businessDate, format) => ipcRenderer.invoke('report:export', businessDate, format),
   },
-  export: (format) => ipcRenderer.invoke('export:data', format),
+  export: (format, filters) => ipcRenderer.invoke('export:data', format, filters),
   database: {
     backup: () => ipcRenderer.invoke('database:backup'),
     restore: () => ipcRenderer.invoke('database:restore'),
+    automaticStatus: () => ipcRenderer.invoke('database:automatic-status'),
   },
   window: {
     minimize: () => ipcRenderer.send('window:minimize'),
@@ -53,6 +57,9 @@ contextBridge.exposeInMainWorld('salesApi', {
       create: (input) => ipcRenderer.invoke('ai:sessions:create', input),
       getOrCreate: (input) => ipcRenderer.invoke('ai:sessions:get-or-create', input),
       append: (input) => ipcRenderer.invoke('ai:sessions:append', input),
+      claim: (input) => ipcRenderer.invoke('ai:messages:claim', input),
+      complete: (input) => ipcRenderer.invoke('ai:messages:complete', input),
+      cancel: (input) => ipcRenderer.invoke('ai:messages:cancel', input),
     },
     getConfig: () => ipcRenderer.invoke('ai:get-config'),
     setKey: (key) => ipcRenderer.invoke('ai:set-key', key),
@@ -60,7 +67,10 @@ contextBridge.exposeInMainWorld('salesApi', {
     saveModel: (model) => ipcRenderer.invoke('ai:save-model', model),
     analyze: (question, history, mode) => ipcRenderer.invoke('ai:analyze', question, history, mode),
   },
-  auth: { login: (input) => ipcRenderer.invoke('auth:login', input) },
+  auth: {
+    login: (input) => ipcRenderer.invoke('auth:login', input),
+    logout: () => ipcRenderer.invoke('auth:logout'),
+  },
   cash: {
     open: (amountCents) => ipcRenderer.invoke('cash:open', amountCents),
     get: () => ipcRenderer.invoke('cash:get'),
