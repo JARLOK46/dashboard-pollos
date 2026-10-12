@@ -36,7 +36,7 @@ function sanitizeSnapshot(value) {
   return result;
 }
 function presentMoney(value, currency) {
-  return { amount: Number(value || 0) / 100, currency };
+  return { amount: Number(value || 0), currency };
 }
 function presentFinancialData(value, currency) {
   if (Array.isArray(value)) return value.map((item) => presentFinancialData(item, currency));
@@ -58,12 +58,26 @@ function presentFinancialData(value, currency) {
   return result;
 }
 function buildAiSnapshot() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = database.getBusinessDate();
   const analytics = database.getSalesAnalytics({ from: today, to: today });
   const currency = database.getSettings().currency;
   return presentFinancialData(
     sanitizeSnapshot({
       moneda: currency,
+      coberturaDatos: {
+        fechaNegocio: today,
+        fechaCalculada: "SQLite date('now','localtime')",
+        ventasDelDia: 'Incluye el resumen exacto del día hábil local indicado.',
+        historico:
+          'No incluido: no hay datos suficientes para afirmar totales semanales o históricos completos.',
+        limites: {
+          ventasRecientes: AI_LIMITS.sales,
+          productos: AI_LIMITS.products,
+          gastosRecientes: AI_LIMITS.expenses,
+        },
+        advertencia:
+          'Las listas recientes están truncadas; no representan el total histórico ni semanal.',
+      },
       ventasHoy: {
         resumen: {
           totalCents: analytics.totalCents,
@@ -239,7 +253,7 @@ async function analyzeWithOllama(question, history = [], mode = 'question') {
   if (!settings.model) throw new Error('El modelo seleccionado no es válido.');
   const key = credentials.getApiKey();
   const snapshot = buildAiSnapshot();
-  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}],"toolCall":null}. Solo podés proponer, nunca ejecutar, toolCall para una acción explícitamente solicitada: gasto {"name":"create_expense","arguments":{"description":"texto","amountCents":500000,"category":"insumos|servicios|personal|other"}}, retiro {"name":"cash_withdrawal","arguments":{"reason":"texto","amountCents":1500000}}, ajuste de stock {"name":"stock_adjustment","arguments":{"productId":1,"quantityDelta":-2,"reason":"texto"}} o producto {"name":"create_product","arguments":{"name":"texto","description":"texto","priceCents":1500000,"costCents":500000,"stock":10}} o anulación de venta {"name":"void_sale","arguments":{"saleId":123,"reason":"motivo claro"}}. Para pedidos de reporte diario, usá los datos de reporte ya presentes en ventas, gastos, retiros, caja, ganancia bruta y alertas, y expresá una respuesta estructurada con métricas claras; el reporte es solo de lectura y nunca requiere confirmación. Todos los campos son estrictos (enteros en centavos, IDs positivos, texto acotado). Nunca ejecutes herramientas ni afirmes que registraste nada: toolCall es únicamente una propuesta explícita pendiente de confirmación humana. Para cualquier otra consulta, toolCall debe ser null. Si no podés cumplirlo, respondé texto plano. Los importes del snapshot y de las respuestas están en unidades completas de ${snapshot.moneda}; únicamente los argumentos monetarios de toolCall deben convertirse a centavos enteros multiplicando por 100 exactamente una vez (por ejemplo, ${snapshot.moneda} 5000 -> amountCents 500000 y ${snapshot.moneda} 15000 -> priceCents 1500000).`;
+  const outputContract = `Devolvé JSON válido (sin markdown) con esta forma: {"summary":"respuesta breve en español","period":"período analizado","source":"fuente de datos","metrics":[{"label":"nombre","value":"importe completo o valor","detail":"opcional"}],"toolCall":null}. Solo podés proponer, nunca ejecutar, toolCall para una acción explícitamente solicitada: gasto {"name":"create_expense","arguments":{"description":"texto","amountCents":5000,"category":"insumos|servicios|personal|other"}}, retiro {"name":"cash_withdrawal","arguments":{"reason":"texto","amountCents":15000}}, ajuste de stock {"name":"stock_adjustment","arguments":{"productId":1,"quantityDelta":-2,"reason":"texto"}} o producto {"name":"create_product","arguments":{"name":"texto","description":"texto","priceCents":15000,"costCents":5000,"stock":10}} o anulación de venta {"name":"void_sale","arguments":{"saleId":123,"reason":"motivo claro"}}. Para pedidos de reporte diario, usá los datos de reporte ya presentes en ventas, gastos, retiros, caja, ganancia bruta y alertas, y expresá una respuesta estructurada con métricas claras; el reporte es solo de lectura y nunca requiere confirmación. Todos los campos son estrictos (importes enteros en unidades completas de COP, IDs positivos, texto acotado). Nunca ejecutes herramientas ni afirmes que registraste nada: toolCall es únicamente una propuesta explícita pendiente de confirmación humana. Para cualquier otra consulta, toolCall debe ser null. Si no podés cumplirlo, respondé texto plano. Los importes del snapshot, de las respuestas y de los argumentos monetarios de toolCall son unidades completas de ${snapshot.moneda}; no conviertas ni dividas por 100 (por ejemplo, ${snapshot.moneda} 5000 -> amountCents 5000 y ${snapshot.moneda} 15000 -> priceCents 15000).`;
   const boundedHistory = Array.isArray(history)
     ? history
         .slice(-AI_LIMITS.contextMessages)
@@ -249,7 +263,7 @@ async function analyzeWithOllama(question, history = [], mode = 'question') {
         }))
         .slice(-AI_LIMITS.contextMessages)
     : [];
-  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es ${snapshot.moneda}. Los importes financieros del snapshot aparecen en unidades monetarias completas (por ejemplo, {"amount":5000,"currency":"${snapshot.moneda}"}), no en centavos: no los vuelvas a dividir. En texto y métricas conservá esas unidades completas. Si proponés una herramienta, convertí sus importes a centavos enteros multiplicando por 100 exactamente una vez: ${snapshot.moneda} 5000 se convierte en amountCents 500000 y ${snapshot.moneda} 15000 en priceCents 1500000. No envíes objetos de dinero ni unidades completas en amountCents, priceCents o costCents. Conservá la moneda ${snapshot.moneda}.\n\n${outputContract}\n\nModo: ${mode === 'daily-summary' ? 'generá un resumen diario accionable del negocio usando explícitamente ventas, gastos, retiros, estado/diferencia de caja, ganancia bruta y alertas; representá cada dato importante en metrics para facilitar su renderizado' : 'respondé la pregunta'}\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
+  const prompt = `Sos un asesor operativo para una pollería. Respondé exclusivamente en español, con recomendaciones concretas, prudentes y basadas únicamente en los datos provistos. No inventes datos, no ejecutes acciones, no pidas secretos y aclarà las limitaciones. Las listas del snapshot pueden estar truncadas: revisá coberturaDatos antes de concluir. No presentes ventas recientes, productos o gastos recientes como totales completos. No afirmes totales semanales, mensuales o históricos completos salvo que estén explícitamente calculados y respaldados por los datos provistos; si faltan datos, decilo claramente.\n\nREGLA MONETARIA OBLIGATORIA: la moneda del negocio es COP. Todos los importes financieros del snapshot y de las herramientas son unidades enteras de COP (por ejemplo, {"amount":5000,"currency":"COP"}); no los dividas ni multipliques por 100. En texto y métricas conservá esas unidades enteras. Si proponés una herramienta, enviá los importes directamente como enteros en amountCents, priceCents o costCents (COP 5000 se envía como 5000). Conservá la moneda COP.\n\n${outputContract}\n\nModo: ${mode === 'daily-summary' ? 'generá un resumen diario accionable del negocio usando explícitamente ventas, gastos, retiros, estado/diferencia de caja, ganancia bruta y alertas; representá cada dato importante en metrics para facilitar su renderizado' : 'respondé la pregunta'}\nPregunta del dueño: ${question.trim()}\nDatos sanitizados: ${JSON.stringify(snapshot)}`;
   const contextText = JSON.stringify(boundedHistory);
   const fullPrompt = `${prompt}\nContexto reciente (solo lectura): ${contextText}`;
   if (fullPrompt.length > AI_LIMITS.prompt)
@@ -298,6 +312,21 @@ async function analyzeWithOllama(question, history = [], mode = 'question') {
 }
 
 const isDev = !app.isPackaged;
+const applicationWindows = new Set();
+const authenticatedSenders = new Map();
+
+function getApplicationWindow(event) {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || !applicationWindows.has(window)) throw new Error('Acceso IPC no autorizado.');
+  return window;
+}
+
+function requireAuthenticatedSender(event) {
+  const window = getApplicationWindow(event);
+  const session = authenticatedSenders.get(event.sender);
+  if (!session || session.window !== window) throw new Error('La sesión requiere autenticación.');
+  return window;
+}
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -315,12 +344,26 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
+  applicationWindows.add(window);
+  window.webContents.once('destroyed', () => {
+    authenticatedSenders.delete(window.webContents);
+    applicationWindows.delete(window);
+  });
+  window.on('closed', () => {
+    authenticatedSenders.delete(window.webContents);
+    applicationWindows.delete(window);
+  });
   if (isDev) window.loadURL('http://localhost:5173');
   else window.loadFile(path.join(__dirname, '../dist/index.html'));
 }
 
 function registerIpc() {
   const { ipcMain, dialog } = require('electron');
+  const protectedHandle = (channel, listener) =>
+    ipcMain.handle(channel, (event, ...args) => {
+      requireAuthenticatedSender(event);
+      return listener(event, ...args);
+    });
   ipcMain.on('window:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.on('window:maximize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -332,26 +375,26 @@ function registerIpc() {
     'window:is-maximized',
     (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false,
   );
-  ipcMain.handle('products:list', () => database.listProducts());
-  ipcMain.handle('products:create', (_event, input) => database.createProduct(input));
-  ipcMain.handle('products:update', (_event, input) => database.updateProduct(input));
-  ipcMain.handle('products:archive', (_event, input) => database.archiveProduct(input));
-  ipcMain.handle('products:adjust-stock', (_event, input) => database.adjustProductStock(input));
-  ipcMain.handle('products:movements', (_event, productId, limit, filters) =>
+  protectedHandle('products:list', () => database.listProducts());
+  protectedHandle('products:create', (_event, input) => database.createProduct(input));
+  protectedHandle('products:update', (_event, input) => database.updateProduct(input));
+  protectedHandle('products:archive', (_event, input) => database.archiveProduct(input));
+  protectedHandle('products:adjust-stock', (_event, input) => database.adjustProductStock(input));
+  protectedHandle('products:movements', (_event, productId, limit, filters) =>
     database.listInventoryMovements(productId, limit, filters),
   );
-  ipcMain.handle('sales:create', (_event, input) => database.createSale(input));
-  ipcMain.handle('sales:void', (_event, id, reason) => database.voidSale(id, reason));
-  ipcMain.handle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
-  ipcMain.handle('sales:analytics', (_event, filters) => database.getSalesAnalytics(filters));
-  ipcMain.handle('sales:get', (_event, id) => database.getSale(id));
-  ipcMain.handle('expenses:create', (_event, input) => database.createExpense(input));
-  ipcMain.handle('expenses:list', (_event, limit) => database.listExpenses(limit));
-  ipcMain.handle('cash:withdraw', (_event, input) => database.createWithdrawal(input));
-  ipcMain.handle('dashboard:summary', () => database.getDashboardSummary());
-  ipcMain.handle('dashboard:alerts', () => database.getDashboardAlerts());
-  ipcMain.handle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
-  ipcMain.handle('database:backup', async (event) => {
+  protectedHandle('sales:create', (_event, input) => database.createSale(input));
+  protectedHandle('sales:void', (_event, id, reason) => database.voidSale(id, reason));
+  protectedHandle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
+  protectedHandle('sales:analytics', (_event, filters) => database.getSalesAnalytics(filters));
+  protectedHandle('sales:get', (_event, id) => database.getSale(id));
+  protectedHandle('expenses:create', (_event, input) => database.createExpense(input));
+  protectedHandle('expenses:list', (_event, limit) => database.listExpenses(limit));
+  protectedHandle('cash:withdraw', (_event, input) => database.createWithdrawal(input));
+  protectedHandle('dashboard:summary', () => database.getDashboardSummary());
+  protectedHandle('dashboard:alerts', () => database.getDashboardAlerts());
+  protectedHandle('report:daily', (_event, businessDate) => database.getDailyReport(businessDate));
+  protectedHandle('database:backup', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showSaveDialog(win, {
       title: 'Crear copia de seguridad',
@@ -374,7 +417,7 @@ function registerIpc() {
     }
     return { canceled: false, ...(await database.backupDatabase(result.filePath)) };
   });
-  ipcMain.handle('database:restore', async (event) => {
+  protectedHandle('database:restore', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(win, {
       title: 'Restaurar copia de seguridad',
@@ -394,7 +437,7 @@ function registerIpc() {
     if (confirmation.response !== 1) return { canceled: true };
     return { canceled: false, ...database.restoreDatabase(result.filePaths[0]) };
   });
-  ipcMain.handle('report:export', async (_event, businessDate, format) => {
+  protectedHandle('report:export', async (_event, businessDate, format) => {
     const fs = require('node:fs/promises');
     const report = database.getDailyReport(businessDate);
     const extension = format === 'csv' ? 'csv' : 'xlsx';
@@ -409,26 +452,27 @@ function registerIpc() {
     else {
       const rows = [
         ['Reporte diario', businessDate],
-        ['Ventas', report.totalCents / 100],
+        ['Moneda', 'COP'],
+        ['Ventas', report.totalCents ],
         ['Pedidos', report.orders],
-        ['Efectivo', report.paymentSplit.cashCents / 100],
-        ['Tarjeta', report.paymentSplit.cardCents / 100],
-        ['Costo', report.costCents / 100],
-        ['Ganancia bruta', report.grossProfitCents / 100],
+        ['Efectivo', report.paymentSplit.cashCents ],
+        ['Tarjeta', report.paymentSplit.cardCents ],
+        ['Costo', report.costCents ],
+        ['Ganancia bruta', report.grossProfitCents ],
         ['Margen %', report.marginPercent],
-        ['Gastos', report.expensesTotalCents / 100],
-        ['Retiros de efectivo', report.withdrawalsTotalCents / 100],
-        ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents / 100],
-        ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents / 100],
-        ['Contado caja', report.cash.countedCents == null ? '' : report.cash.countedCents / 100],
+        ['Gastos', report.expensesTotalCents ],
+        ['Retiros de efectivo', report.withdrawalsTotalCents ],
+        ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents ],
+        ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents ],
+        ['Contado caja', report.cash.countedCents == null ? '' : report.cash.countedCents ],
         [
           'Diferencia caja',
-          report.cash.differenceCents == null ? '' : report.cash.differenceCents / 100,
+          report.cash.differenceCents == null ? '' : report.cash.differenceCents ,
         ],
         ['Estado caja', report.cash.status],
         [],
         ['Categoría', 'Total'],
-        ...report.expenses.map((expense) => [expense.category, expense.total_cents / 100]),
+        ...report.expenses.map((expense) => [expense.category, expense.total_cents ]),
       ];
       const escape = (value) => `"${String(value).replaceAll('"', '""')}"`;
       await fs.writeFile(
@@ -439,44 +483,59 @@ function registerIpc() {
     }
     return { canceled: false, filePath: result.filePath };
   });
-  ipcMain.handle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
-  ipcMain.handle('cash:get', () => database.getCashRegister());
-  ipcMain.handle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
-  ipcMain.handle('settings:get', () => database.getSettings());
-  ipcMain.handle('settings:update', (_event, input) => database.updateSettings(input));
-  ipcMain.handle('ai:sessions:list', (_event, limit) => database.listAiSessions(limit));
-  ipcMain.handle('ai:sessions:get', (_event, id) => database.getAiSession(id));
-  ipcMain.handle('ai:sessions:delete', (_event, id) => database.deleteAiSession(id));
-  ipcMain.handle('ai:sessions:create', (_event, input) => database.createAiSession(input));
-  ipcMain.handle('ai:sessions:get-or-create', (_event, input) =>
+  protectedHandle('cash:open', (_event, amountCents) => database.openCashRegister(amountCents));
+  protectedHandle('cash:get', () => database.getCashRegister());
+  protectedHandle('cash:close', (_event, countedCents) => database.closeCashRegister(countedCents));
+  protectedHandle('settings:get', () => database.getSettings());
+  protectedHandle('settings:update', (_event, input) => database.updateSettings(input));
+  protectedHandle('ai:sessions:list', (_event, limit) => database.listAiSessions(limit));
+  protectedHandle('ai:sessions:get', (_event, id) => database.getAiSession(id));
+  protectedHandle('ai:sessions:delete', (_event, id) => database.deleteAiSession(id));
+  protectedHandle('ai:sessions:create', (_event, input) => database.createAiSession(input));
+  protectedHandle('ai:sessions:get-or-create', (_event, input) =>
     database.getOrCreateAiSession(input),
   );
-  ipcMain.handle('ai:sessions:append', (_event, input) => database.appendAiMessage(input));
-  ipcMain.handle('ai:get-config', () => ({
+  protectedHandle('ai:sessions:append', (_event, input) => database.appendAiMessage(input));
+  protectedHandle('ai:messages:claim', (_event, input) => database.claimAiMessage(input));
+  protectedHandle('ai:messages:complete', (_event, input) => database.completeAiMessage(input));
+  protectedHandle('ai:messages:cancel', (_event, input) => database.cancelAiMessage(input));
+  protectedHandle('ai:get-config', () => ({
     ...database.getOllamaSettings(),
     ...credentials.getStatus(),
   }));
-  ipcMain.handle('ai:set-key', (_event, key) => {
+  protectedHandle('ai:set-key', (_event, key) => {
     const result = credentials.saveApiKey(key);
     database.updateOllamaConfigured(true);
     return { ...database.getOllamaSettings(), ...result };
   });
-  ipcMain.handle('ai:clear-key', () => {
+  protectedHandle('ai:clear-key', () => {
     const result = credentials.clearApiKey();
     database.updateOllamaConfigured(false);
     return { ...database.getOllamaSettings(), ...result };
   });
-  ipcMain.handle('ai:save-model', (_event, model) => database.saveOllamaModel(model));
-  ipcMain.handle('ai:analyze', (_event, question, history, mode) =>
+  protectedHandle('ai:save-model', (_event, model) => database.saveOllamaModel(model));
+  protectedHandle('ai:analyze', (_event, question, history, mode) =>
     analyzeWithOllama(question, history, mode),
   );
-  ipcMain.handle('auth:login', (_event, input) =>
-    database.authenticateAdmin(input?.email, input?.password),
-  );
-  ipcMain.handle('auth:change-password', (_event, input) =>
+  ipcMain.handle('auth:login', (event, input) => {
+    const window = getApplicationWindow(event);
+    const authenticated = database.authenticateAdmin(input?.email, input?.password);
+    if (authenticated)
+      authenticatedSenders.set(event.sender, {
+        window,
+        email: input?.email,
+        authenticatedAt: Date.now(),
+      });
+    return authenticated;
+  });
+  protectedHandle('auth:logout', (event) => {
+    authenticatedSenders.delete(event.sender);
+    return { loggedOut: true };
+  });
+  protectedHandle('auth:change-password', (_event, input) =>
     database.changeAdminPassword(input?.currentPassword, input?.newPassword),
   );
-  ipcMain.handle('export:data', async (_event, format) => {
+  protectedHandle('export:data', async (_event, format) => {
     const fs = require('node:fs/promises');
     const extension = format === 'csv' ? 'csv' : 'xlsx';
     const result = await dialog.showSaveDialog({
@@ -488,17 +547,17 @@ function registerIpc() {
     const sales = database.listSales(10000);
     const expenses = database.listExpenses(10000);
     const rows = [
-      ['Venta', 'Fecha', 'Productos', 'Total', 'Método de pago', 'Efectivo recibido', 'Vuelto'],
+      ['Venta', 'Fecha', 'Productos', 'Total (COP)', 'Método de pago', 'Efectivo recibido (COP)', 'Vuelto (COP)'],
     ];
     for (const sale of sales)
       rows.push([
         `#${sale.id}`,
         sale.created_at,
         sale.items.map((item) => `${item.quantity} x ${item.product_name}`).join(' | '),
-        (sale.total_cents / 100).toFixed(2),
+        (sale.total_cents ),
         sale.payment_method === 'cash' ? 'Efectivo' : 'Tarjeta',
-        (sale.amount_received_cents / 100).toFixed(2),
-        (sale.change_cents / 100).toFixed(2),
+        (sale.amount_received_cents ),
+        (sale.change_cents ),
       ]);
     if (format === 'xlsx') {
       XLSX.writeFile(buildWorkbook(sales, expenses), result.filePath);

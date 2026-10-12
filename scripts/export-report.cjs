@@ -9,42 +9,43 @@ function buildWorkbook(sales, expenses, report = null) {
     ['POLLO & CAJA'],
     ['Reporte de operación'],
     ['Generado', new Date().toLocaleString('es-AR')],
+    ['Moneda', 'COP'],
     [],
     ['RESUMEN'],
     ['Fecha del reporte', report?.businessDate || ''],
     ['Ventas registradas', report?.orders ?? sales.length],
     [
       'Ingresos por ventas',
-      report?.totalCents != null ? report.totalCents / 100 : totalSales / 100,
+      report?.totalCents != null ? report.totalCents  : totalSales ,
     ],
-    ['Efectivo', report?.paymentSplit ? report.paymentSplit.cashCents / 100 : ''],
-    ['Tarjeta', report?.paymentSplit ? report.paymentSplit.cardCents / 100 : ''],
-    ['Costo de ventas', report?.costCents != null ? report.costCents / 100 : ''],
-    ['Ganancia bruta', report?.grossProfitCents != null ? report.grossProfitCents / 100 : ''],
+    ['Efectivo', report?.paymentSplit ? report.paymentSplit.cashCents  : ''],
+    ['Tarjeta', report?.paymentSplit ? report.paymentSplit.cardCents  : ''],
+    ['Costo de ventas', report?.costCents != null ? report.costCents  : ''],
+    ['Ganancia bruta', report?.grossProfitCents != null ? report.grossProfitCents  : ''],
     ['Margen %', report?.marginPercent ?? ''],
     ['Gastos registrados', expenses.length],
-    ['Total de gastos', totalExpenses / 100],
-    ['Resultado neto', (totalSales - totalExpenses) / 100],
+    ['Total de gastos', totalExpenses ],
+    ['Resultado neto', (totalSales - totalExpenses) ],
   ];
-  const salesRows = [['ID', 'Fecha', 'Productos', 'Total', 'Método de pago', 'Recibido', 'Vuelto']];
+  const salesRows = [['ID', 'Fecha', 'Productos', 'Total (COP)', 'Método de pago', 'Recibido (COP)', 'Vuelto (COP)']];
   for (const sale of sales)
     salesRows.push([
       `#${sale.id}`,
       sale.created_at,
       sale.items.map((item) => `${item.quantity} x ${item.product_name}`).join(' | '),
-      sale.total_cents / 100,
+      sale.total_cents ,
       sale.payment_method === 'cash' ? 'Efectivo' : 'Tarjeta',
-      sale.amount_received_cents / 100,
-      sale.change_cents / 100,
+      sale.amount_received_cents ,
+      sale.change_cents ,
     ]);
-  const expenseRows = [['ID', 'Fecha', 'Descripción', 'Categoría', 'Monto', 'Notas']];
+  const expenseRows = [['ID', 'Fecha', 'Descripción', 'Categoría', 'Monto (COP)', 'Notas']];
   for (const expense of expenses)
     expenseRows.push([
       `#${expense.id}`,
       expense.created_at,
       expense.description,
       expense.category,
-      expense.amount_cents / 100,
+      expense.amount_cents ,
       expense.notes || '',
     ]);
   const summarySheet = XLSX.utils.aoa_to_sheet(summary);

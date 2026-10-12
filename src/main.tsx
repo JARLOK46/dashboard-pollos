@@ -42,6 +42,7 @@ type ProductInput = {
   stock: number;
   imagePath: string | null;
 };
+type AiToolStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'cancelled';
 type AiToolCall =
   | {
       name: 'create_expense';
@@ -112,8 +113,10 @@ type DashboardAlert = {
   message: string;
   page: Page;
 };
-const money = (cents: number) =>
-  `$ ${new Intl.NumberFormat('es-AR').format(Math.round(cents / 100))}`;
+const money = (amount: number) =>
+  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(
+    amount,
+  );
 function formatAIOutput(text: string) {
   return text
     .replace(/\r\n/g, '\n')
@@ -152,7 +155,7 @@ function App() {
   } | null>(null);
   const [settings, setSettings] = useState<SettingsData>({
     businessName: 'Pollo & Caja',
-    currency: 'ARS',
+    currency: 'COP',
     lowStockThreshold: 10,
   });
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
@@ -171,8 +174,8 @@ function App() {
     setAlerts(currentAlerts as DashboardAlert[]);
   };
   useEffect(() => {
-    refresh();
-  }, []);
+    if (authenticated) void refresh();
+  }, [authenticated]);
   useEffect(() => {
     localStorage.setItem('pollo-caja-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
@@ -189,7 +192,8 @@ function App() {
         />
       </>
     );
-  const logout = () => {
+  const logout = async () => {
+    await window.salesApi.auth.logout();
     setAuthenticated(false);
     setPage('dashboard');
     setAlerts([]);
@@ -276,17 +280,26 @@ function ExpenseToolPreview({
   toolCall,
   currency,
   onCancel,
+  onStatus,
   refresh,
+  messageId,
+  sessionId,
+  toolStatus = 'pending',
+  toolError,
 }: {
   toolCall: AiToolCall;
   currency: string;
   onCancel: () => void;
+  onStatus: (status: AiToolStatus, error?: string | null) => void;
   refresh: () => Promise<void>;
+  messageId?: number;
+  sessionId: string;
+  toolStatus?: AiToolStatus;
+  toolError?: string | null;
 }) {
   const [draft, setDraft] = useState<any>(toolCall.arguments);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
   const [image, setImage] = useState<string | null>(null);
   const submit = async () => {
     if (busy) return;
@@ -339,6 +352,13 @@ function ExpenseToolPreview({
       return setError('Revisá la venta y el motivo.');
     setBusy(true);
     try {
+      if (!messageId) throw new Error('La propuesta no tiene un identificador válido.');
+      const claim = await window.salesApi.ai.sessions.claim({ sessionId, messageId });
+      if (!claim.claimed) {
+        onStatus(claim.status);
+        return;
+      }
+      onStatus('claimed');
       if (toolCall.name === 'create_expense') await window.salesApi.expenses.create(draft);
       else if (toolCall.name === 'cash_withdrawal') await window.salesApi.cash.withdraw(draft);
       else if (toolCall.name === 'stock_adjustment')
@@ -346,10 +366,20 @@ function ExpenseToolPreview({
       else if (toolCall.name === 'void_sale')
         await window.salesApi.sales.void(draft.saleId, draft.reason.trim());
       else await window.salesApi.products.create({ ...draft, imagePath: image });
+      await window.salesApi.ai.sessions.complete({ sessionId, messageId, status: 'completed' });
+      onStatus('completed');
       await refresh();
-      setDone(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo completar la acción.');
+      const message = cause instanceof Error ? cause.message : 'No se pudo completar la acción.';
+      setError(message);
+      if (messageId) {
+        try {
+          await window.salesApi.ai.sessions.complete({ sessionId, messageId, status: 'failed', error: message });
+          onStatus('failed', message);
+        } catch {
+          // Keep the original action error visible if lifecycle persistence also fails.
+        }
+      }
     } finally {
       setBusy(false);
     }
@@ -373,13 +403,21 @@ function ExpenseToolPreview({
     reader.onerror = () => setError('No se pudo leer la imagen.');
     reader.readAsDataURL(file);
   };
-  if (done)
+  const lifecycleMessage =
+    toolStatus === 'completed'
+      ? `${title[0].toUpperCase() + title.slice(1)} registrado.`
+      : toolStatus === 'claimed'
+        ? 'Acción en curso…'
+        : toolStatus === 'cancelled'
+          ? 'Propuesta cancelada.'
+          : toolStatus === 'failed'
+            ? `No se pudo completar la acción.${toolError ? ` ${toolError}` : ''}`
+            : null;
+  if (lifecycleMessage)
     return (
-      <div className="ai-tool-preview success-message" role="status">
-        {title[0].toUpperCase() + title.slice(1)} registrado.{' '}
-        <button type="button" className="link-button" onClick={onCancel}>
-          Cerrar
-        </button>
+      <div className={`ai-tool-preview ${toolStatus === 'completed' ? 'success-message' : ''}`} role="status">
+        {lifecycleMessage}{' '}
+        <button type="button" className="link-button" onClick={onCancel}>Cerrar</button>
       </div>
     );
   const amount = 'amountCents' in draft;
@@ -405,11 +443,11 @@ function ExpenseToolPreview({
             Monto ({currency})
             <input
               type="number"
-              min="0.01"
-              step="0.01"
-              value={(draft.amountCents / 100).toFixed(2)}
+              min="1"
+              step="1"
+              value={draft.amountCents}
               onChange={(e) =>
-                setDraft({ ...draft, amountCents: Math.round(Number(e.target.value) * 100) })
+                setDraft({ ...draft, amountCents: Number(e.target.value) })
               }
             />
           </label>
@@ -441,11 +479,11 @@ function ExpenseToolPreview({
             Monto ({currency})
             <input
               type="number"
-              min="0.01"
-              step="0.01"
-              value={(draft.amountCents / 100).toFixed(2)}
+              min="1"
+              step="1"
+              value={draft.amountCents}
               onChange={(e) =>
-                setDraft({ ...draft, amountCents: Math.round(Number(e.target.value) * 100) })
+                setDraft({ ...draft, amountCents: Number(e.target.value) })
               }
             />
           </label>
@@ -485,7 +523,7 @@ function ExpenseToolPreview({
           <p>
             <strong>Venta #{draft.saleId}</strong>
             {draft.sale?.total_cents != null &&
-              ` · Total ${currency} ${(draft.sale.total_cents / 100).toFixed(2)}`}
+              ` · Total ${money(draft.sale.total_cents)}`}
           </p>
           {draft.sale?.items?.length ? (
             <small>
@@ -522,10 +560,10 @@ function ExpenseToolPreview({
             <input
               type="number"
               min="0"
-              step="0.01"
-              value={(draft.priceCents / 100).toFixed(2)}
+              step="1"
+              value={draft.priceCents}
               onChange={(e) =>
-                setDraft({ ...draft, priceCents: Math.round(Number(e.target.value) * 100) })
+                setDraft({ ...draft, priceCents: Number(e.target.value) })
               }
             />
           </label>
@@ -534,10 +572,10 @@ function ExpenseToolPreview({
             <input
               type="number"
               min="0"
-              step="0.01"
-              value={(draft.costCents / 100).toFixed(2)}
+              step="1"
+              value={draft.costCents}
               onChange={(e) =>
-                setDraft({ ...draft, costCents: Math.round(Number(e.target.value) * 100) })
+                setDraft({ ...draft, costCents: Number(e.target.value) })
               }
             />
           </label>
@@ -594,37 +632,167 @@ function ChatDeleteModal({ conversation, busy, close, confirm }: { conversation:
   if (!conversation) return null;
   return <div className="modal-backdrop chat-delete-backdrop"><div className="modal delete-modal chat-delete-modal" role="dialog" aria-modal="true" aria-labelledby="chat-delete-title" aria-describedby="chat-delete-description"><div className="modal-heading"><h2 id="chat-delete-title">¿Eliminar este chat?</h2><button type="button" aria-label="Cerrar confirmación" onClick={close} disabled={busy}>×</button></div><p className="chat-delete-name">“{conversation.title}”</p><p id="chat-delete-description" className="delete-explanation">El chat y todos sus mensajes se eliminarán permanentemente. Esta acción no se puede deshacer.</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={close} disabled={busy}>Cancelar</button><button type="button" className="destructive-button" onClick={confirm} disabled={busy}>{busy ? 'Eliminando…' : 'Eliminar chat'}</button></div></div></div>;
 }
-function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () => Promise<void> }) {
-  type Message = {
-    role: 'user' | 'assistant';
-    text: string;
-    period?: string | null;
-    source?: string;
-    metrics?: Array<{ label: string; value: string; detail?: string }>;
-    toolCall?: AiToolCall | null;
+type AiMessage = {
+  id?: number;
+  role: 'user' | 'assistant';
+  text: string;
+  period?: string | null;
+  source?: string;
+  metrics?: Array<{ label: string; value: string; detail?: string }>;
+  toolCall?: AiToolCall | null;
+  toolStatus?: AiToolStatus;
+  toolError?: string | null;
+};
+type AiConversation = { id: string; title: string; updatedAt: number; messages: AiMessage[] };
+const createAiConversation = (): AiConversation => ({
+  id: `ai-session-${crypto.randomUUID()}`,
+  title: 'Nuevo chat',
+  updatedAt: Date.now(),
+  messages: [],
+});
+
+type ConversationPersistenceOptions = {
+  conversations: AiConversation[];
+  setConversations: React.Dispatch<React.SetStateAction<AiConversation[]>>;
+  activeId: string;
+  setActiveId: React.Dispatch<React.SetStateAction<string>>;
+  busy: boolean;
+  setQuestion: React.Dispatch<React.SetStateAction<string>>;
+  setError: React.Dispatch<React.SetStateAction<string>>;
+  setHistoryOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  deletingId: string | null;
+  setDeletingId: React.Dispatch<React.SetStateAction<string | null>>;
+  setPendingDelete: React.Dispatch<React.SetStateAction<AiConversation | null>>;
+  createConversation?: () => AiConversation;
+  loadSessions?: boolean;
+};
+
+function useConversationPersistence({
+  conversations,
+  setConversations,
+  activeId,
+  setActiveId,
+  busy,
+  setQuestion,
+  setError,
+  setHistoryOpen,
+  deletingId,
+  setDeletingId,
+  setPendingDelete,
+  createConversation = createAiConversation,
+  loadSessions = true,
+}: ConversationPersistenceOptions) {
+  const activeIdRef = useRef(activeId);
+  const deletingSessionIdsRef = useRef(new Set<string>());
+  activeIdRef.current = activeId;
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === activeId) ?? conversations[0];
+  const updateActive = (update: (conversation: AiConversation) => AiConversation) =>
+    setConversations((previous) =>
+      previous.map((conversation) =>
+        conversation.id === activeIdRef.current ? update(conversation) : conversation,
+      ),
+    );
+  useEffect(() => {
+    if (!activeId && conversations[0]) setActiveId(conversations[0].id);
+  }, [activeId, conversations, setActiveId]);
+  useEffect(() => {
+    if (!loadSessions) return;
+    let disposed = false;
+    window.salesApi.ai.sessions
+      .list()
+      .then(async (list) => {
+        const rows = await Promise.all(
+          list.map(async (item) => {
+            const full = await window.salesApi.ai.sessions.get(item.id);
+            return full
+              ? { id: full.id, title: full.title, updatedAt: Date.parse(full.updated_at) || Date.now(), messages: full.messages }
+              : null;
+          }),
+        );
+        if (disposed) return;
+        const loaded = rows.filter(Boolean) as AiConversation[];
+        if (loaded.length) {
+          setConversations(loaded);
+          setActiveId(loaded[0].id);
+          return;
+        }
+        const fresh = createConversation();
+        const persisted = await window.salesApi.ai.sessions.getOrCreate({ id: fresh.id, title: fresh.title });
+        if (!disposed && persisted) {
+          setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
+          setActiveId(persisted.id);
+        }
+      })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, [createConversation, loadSessions, setActiveId, setConversations]);
+  const newChat = async () => {
+    const conversation = createConversation();
+    try {
+      await window.salesApi.ai.sessions.create({ id: conversation.id, title: conversation.title });
+      setConversations((previous) => [conversation, ...previous]);
+      setActiveId(conversation.id);
+      setQuestion('');
+      setError('');
+      setHistoryOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.');
+    }
   };
-  type Conversation = { id: string; title: string; updatedAt: number; messages: Message[] };
-  const createConversationId = () => `ai-session-${crypto.randomUUID()}`;
-  const firstConversation = (): Conversation => ({
-    id: createConversationId(),
-    title: 'Nuevo chat',
-    updatedAt: Date.now(),
-    messages: [],
-  });
+  const selectConversation = (id: string) => {
+    setActiveId(id);
+    setQuestion('');
+    setError('');
+    setHistoryOpen(false);
+  };
+  const deleteConversation = async (id: string) => {
+    if (busy || deletingId) return;
+    const currentId = activeIdRef.current;
+    setDeletingId(id);
+    deletingSessionIdsRef.current.add(id);
+    try {
+      await window.salesApi.ai.sessions.delete(id);
+      const remaining = conversations.filter((conversation) => conversation.id !== id);
+      if (id === currentId) {
+        if (remaining.length) {
+          setConversations(remaining);
+          setActiveId(remaining[0].id);
+        } else {
+          const fresh = createConversation();
+          const persisted = await window.salesApi.ai.sessions.getOrCreate({ id: fresh.id, title: fresh.title });
+          setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
+          setActiveId(persisted.id);
+        }
+      } else setConversations(remaining);
+      setQuestion('');
+      setError('');
+      setHistoryOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
+    } finally {
+      deletingSessionIdsRef.current.delete(id);
+      setDeletingId(null);
+      setPendingDelete(null);
+    }
+  };
+  return { activeConversation, activeIdRef, deletingSessionIdsRef, updateActive, newChat, selectConversation, deleteConversation };
+}
+
+function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState('');
-  const [conversations, setConversations] = useState<Conversation[]>(() => [firstConversation()]);
+  const [conversations, setConversations] = useState<AiConversation[]>(() => [createAiConversation()]);
   const [activeId, setActiveId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<AiConversation | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [currency, setCurrency] = useState('ARS');
-  const activeIdRef = useRef(activeId);
-  const deletingSessionIdsRef = useRef(new Set<string>());
-  activeIdRef.current = activeId;
+  const [currency, setCurrency] = useState('COP');
+  const persistence = useConversationPersistence({ conversations, setConversations, activeId, setActiveId, busy, setQuestion, setError, setHistoryOpen, deletingId, setDeletingId, setPendingDelete });
+  const { activeIdRef, deletingSessionIdsRef } = persistence;
   const inputRef = useRef<HTMLInputElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const activeConversation =
@@ -640,49 +808,6 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     if (!activeId && conversations[0]) setActiveId(conversations[0].id);
   }, [activeId, conversations]);
   useEffect(() => {
-    window.salesApi.ai
-      .getConfig()
-      .then((config) => setConfigured(config.configured))
-      .catch(() => setConfigured(null));
-    window.salesApi.settings
-      .get()
-      .then((config) => setCurrency(config.currency || 'ARS'))
-      .catch(() => undefined);
-    window.salesApi.ai.sessions
-      .list()
-      .then(async (list) => {
-        const rows = await Promise.all(
-          list.map(async (item) => {
-            const full = await window.salesApi.ai.sessions.get(item.id);
-            return full
-              ? {
-                  id: full.id,
-                  title: full.title,
-                  updatedAt: Date.parse(full.updated_at) || Date.now(),
-                  messages: full.messages,
-                }
-              : null;
-          }),
-        );
-        const loaded = rows.filter(Boolean) as Conversation[];
-        if (loaded.length) {
-          setConversations(loaded);
-          setActiveId(loaded[0].id);
-        } else {
-          const fresh = firstConversation();
-          const persisted = await window.salesApi.ai.sessions.getOrCreate({
-            id: fresh.id,
-            title: fresh.title,
-          });
-          if (persisted) {
-            setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
-            setActiveId(persisted.id);
-          }
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-  useEffect(() => {
     const openChat = () => {
       setOpen(true);
       setHistoryOpen(false);
@@ -697,14 +822,14 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     if (open)
       chatBodyRef.current?.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, busy, open]);
-  const updateActive = (update: (conversation: Conversation) => Conversation) =>
+  const updateActive = (update: (conversation: AiConversation) => AiConversation) =>
     setConversations((previous) =>
       previous.map((conversation) =>
         conversation.id === activeConversation?.id ? update(conversation) : conversation,
       ),
     );
   const newChat = async () => {
-    const conversation = firstConversation();
+    const conversation = createAiConversation();
     try {
       await window.salesApi.ai.sessions.create({ id: conversation.id, title: conversation.title });
       setConversations((previous) => [conversation, ...previous]);
@@ -735,7 +860,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
           setConversations(remaining);
           setActiveId(remaining[0].id);
         } else {
-          const fresh = firstConversation();
+          const fresh = createAiConversation();
           const persisted = await window.salesApi.ai.sessions.getOrCreate({
             id: fresh.id,
             title: fresh.title,
@@ -762,7 +887,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
     if (!text || busy || !activeConversation) return;
     const requestSessionId = activeConversation.id;
     const prior = messages.slice(-8).map((item) => ({ role: item.role, content: item.text }));
-    const userMessage: Message = { role: 'user', text };
+    const userMessage: AiMessage = { role: 'user', text };
     setQuestion('');
     setError('');
     let persistedSession;
@@ -809,12 +934,14 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
         messages: [
           ...conversation.messages,
           {
+            id: savedAssistant.id,
             role: 'assistant',
             text: answer.text,
             period: answer.period,
             source: answer.source,
             metrics: answer.metrics,
             toolCall: answer.toolCall,
+            toolStatus: answer.toolCall ? 'pending' : undefined,
           },
         ],
       }));
@@ -946,14 +1073,29 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
                       toolCall={message.toolCall}
                       currency={currency}
                       refresh={refresh}
-                      onCancel={() =>
+                      messageId={message.id}
+                      sessionId={activeConversation.id}
+                      toolStatus={message.toolStatus}
+                      toolError={message.toolError}
+                      onStatus={(toolStatus, toolError) =>
                         updateActive((conversation) => ({
                           ...conversation,
                           messages: conversation.messages.map((entry, entryIndex) =>
-                            entryIndex === index ? { ...entry, toolCall: null } : entry,
+                            entryIndex === index ? { ...entry, toolStatus, toolError } : entry,
                           ),
                         }))
                       }
+                      onCancel={async () => {
+                        if (message.id && message.toolStatus === 'pending') {
+                          const result = await window.salesApi.ai.sessions.cancel({ sessionId: activeConversation.id, messageId: message.id });
+                          updateActive((conversation) => ({
+                            ...conversation,
+                            messages: conversation.messages.map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, toolStatus: result.status } : entry,
+                            ),
+                          }));
+                        }
+                      }}
                     />
                   )}
                   {message.role === 'assistant' && (message.period || message.source) && (
@@ -1024,40 +1166,24 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
   );
 }
 function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
-  type Message = {
-    role: 'user' | 'assistant';
-    text: string;
-    period?: string | null;
-    source?: string;
-    metrics?: Array<{ label: string; value: string; detail?: string }>;
-    toolCall?: AiToolCall | null;
-  };
-  type Conversation = { id: string; title: string; updatedAt: number; messages: Message[] };
-  const createConversationId = () => `ai-session-${crypto.randomUUID()}`;
-  const makeConversation = (): Conversation => ({
-    id: createConversationId(),
-    title: 'Nuevo chat',
-    updatedAt: Date.now(),
-    messages: [],
-  });
+  const makeConversation = createAiConversation;
   const suggestions = [
     '¿Cómo fueron las ventas de hoy?',
     '¿Qué productos tienen poco stock?',
     '¿Cuál fue mi ganancia esta semana?',
     '¿Qué alerta debería atender primero?',
   ];
-  const [conversations, setConversations] = useState<Conversation[]>(() => [makeConversation()]);
+  const [conversations, setConversations] = useState<AiConversation[]>(() => [makeConversation()]);
   const [activeId, setActiveId] = useState('');
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<AiConversation | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [currency, setCurrency] = useState('ARS');
-  const activeIdRef = useRef(activeId);
-  const deletingSessionIdsRef = useRef(new Set<string>());
-  activeIdRef.current = activeId;
+  const [currency, setCurrency] = useState('COP');
+  const persistence = useConversationPersistence({ conversations, setConversations, activeId, setActiveId, busy, setQuestion, setError, setHistoryOpen, deletingId, setDeletingId, setPendingDelete, createConversation: makeConversation });
+  const { activeIdRef, deletingSessionIdsRef } = persistence;
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
@@ -1066,51 +1192,12 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
     if (!activeId && conversations[0]) setActiveId(conversations[0].id);
   }, [activeId, conversations]);
   useEffect(() => {
-    window.salesApi.settings
-      .get()
-      .then((settings) => setCurrency(settings.currency || 'ARS'))
-      .catch(() => undefined);
-    window.salesApi.ai.sessions
-      .list()
-      .then(async (list) => {
-        const rows = await Promise.all(
-          list.map(async (item) => {
-            const full = await window.salesApi.ai.sessions.get(item.id);
-            return full
-              ? {
-                  id: full.id,
-                  title: full.title,
-                  updatedAt: Date.parse(full.updated_at) || Date.now(),
-                  messages: full.messages,
-                }
-              : null;
-          }),
-        );
-        const loaded = rows.filter(Boolean) as Conversation[];
-        if (loaded.length) {
-          setConversations(loaded);
-          setActiveId(loaded[0].id);
-        } else {
-          const fresh = makeConversation();
-          const persisted = await window.salesApi.ai.sessions.getOrCreate({
-            id: fresh.id,
-            title: fresh.title,
-          });
-          if (persisted) {
-            setConversations([{ ...fresh, id: persisted.id, title: persisted.title }]);
-            setActiveId(persisted.id);
-          }
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-  useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
   useEffect(() => {
     if (!historyOpen) inputRef.current?.focus();
   }, [historyOpen]);
-  const updateActive = (update: (conversation: Conversation) => Conversation) =>
+  const updateActive = (update: (conversation: AiConversation) => AiConversation) =>
     setConversations((previous) =>
       previous.map((item) => (item.id === active?.id ? update(item) : item)),
     );
@@ -1213,12 +1300,14 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
         messages: [
           ...item.messages,
           {
+            id: savedAssistant.id,
             role: 'assistant',
             text: answer.text,
             period: answer.period,
             source: answer.source,
             metrics: answer.metrics,
             toolCall: answer.toolCall,
+            toolStatus: answer.toolCall ? 'pending' : undefined,
           },
         ],
       }));
@@ -1342,14 +1431,29 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
                     toolCall={message.toolCall}
                     currency={currency}
                     refresh={refresh}
-                    onCancel={() =>
+                    messageId={message.id}
+                    sessionId={active.id}
+                    toolStatus={message.toolStatus}
+                    toolError={message.toolError}
+                    onStatus={(toolStatus, toolError) =>
                       updateActive((item) => ({
                         ...item,
                         messages: item.messages.map((entry, entryIndex) =>
-                          entryIndex === index ? { ...entry, toolCall: null } : entry,
+                          entryIndex === index ? { ...entry, toolStatus, toolError } : entry,
                         ),
                       }))
                     }
+                    onCancel={async () => {
+                      if (message.id && message.toolStatus === 'pending') {
+                        const result = await window.salesApi.ai.sessions.cancel({ sessionId: active.id, messageId: message.id });
+                        updateActive((item) => ({
+                          ...item,
+                          messages: item.messages.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, toolStatus: result.status } : entry,
+                          ),
+                        }));
+                      }
+                    }}
                   />
                 )}
                 {message.role === 'assistant' && (message.period || message.source) && (
@@ -2119,8 +2223,8 @@ function ProductModal({
 }) {
   const [name, setName] = useState(product?.name ?? '');
   const [description, setDescription] = useState(product?.description ?? '');
-  const [price, setPrice] = useState(product ? String(product.price_cents / 100) : '');
-  const [cost, setCost] = useState(product ? String(product.cost_cents / 100) : '');
+  const [price, setPrice] = useState(product ? String(product.price_cents) : '');
+  const [cost, setCost] = useState(product ? String(product.cost_cents) : '');
   const [stock, setStock] = useState(product ? String(product.stock) : '');
   const [image, setImage] = useState(product?.image_path ?? '');
   const [error, setError] = useState('');
@@ -2132,8 +2236,8 @@ function ProductModal({
     Boolean(name.trim() || description.trim() || price || cost || stock || image) &&
     (name !== (product?.name ?? '') ||
       description !== (product?.description ?? '') ||
-      price !== (product ? String(product.price_cents / 100) : '') ||
-      cost !== (product ? String(product.cost_cents / 100) : '') ||
+      price !== (product ? String(product.price_cents) : '') ||
+      cost !== (product ? String(product.cost_cents) : '') ||
       stock !== (product ? String(product.stock) : '') ||
       image !== (product?.image_path ?? ''));
   const requestClose = () => {
@@ -2158,14 +2262,14 @@ function ProductModal({
     const stockValue = Number(stock);
     if (!normalizedName) return setError('Ingresá un nombre para el producto.');
     if (normalizedName.length > 120) return setError('El nombre puede tener hasta 120 caracteres.');
-    if (!Number.isFinite(priceValue) || priceValue < 0 || priceValue > 21474836.47)
-      return setError('Ingresá un precio válido.');
-    if (!Number.isFinite(costValue) || costValue < 0 || costValue > 21474836.47)
-      return setError('Ingresá un costo válido.');
+    if (!Number.isSafeInteger(priceValue) || priceValue < 0 || priceValue > 2147483647)
+      return setError('Ingresá un precio entero válido.');
+    if (!Number.isSafeInteger(costValue) || costValue < 0 || costValue > 2147483647)
+      return setError('Ingresá un costo entero válido.');
     if (!Number.isInteger(stockValue) || stockValue < 0 || stockValue > 2147483647)
       return setError('Ingresá un stock entero válido.');
-    const priceCents = Math.round(priceValue * 100);
-    const costCents = Math.round(costValue * 100);
+    const priceCents = priceValue;
+    const costCents = costValue;
     if (!Number.isSafeInteger(priceCents) || !Number.isSafeInteger(costCents))
       return setError('Los importes son demasiado grandes.');
     setBusy(true);
@@ -2262,8 +2366,8 @@ function ProductModal({
               required
               type="number"
               min="0"
-              max="21474836.47"
-              step="0.01"
+              max="2147483647"
+              step="1"
               inputMode="decimal"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
@@ -2275,8 +2379,8 @@ function ProductModal({
               required
               type="number"
               min="0"
-              max="21474836.47"
-              step="0.01"
+              max="2147483647"
+              step="1"
               inputMode="decimal"
               value={cost}
               onChange={(e) => setCost(e.target.value)}
@@ -2433,19 +2537,19 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
   const [error, setError] = useState('');
   const selected = products.filter((p) => cart[p.id]);
   const total = selected.reduce((sum, p) => sum + p.price_cents * (cart[p.id] || 0), 0);
-  const change = Math.max(0, Math.round(Number(received || 0) * 100) - total);
+  const change = Math.max(0, Math.round(Number(received || 0)) - total);
   const add = (p: Product, delta: number) =>
     setCart((c) => ({ ...c, [p.id]: Math.max(0, Math.min(p.stock, (c[p.id] || 0) + delta)) }));
   const submit = async () => {
     setError('');
     if (!selected.length) return setError('Agregá al menos un producto.');
-    if (payment === 'cash' && Number(received) * 100 < total)
+    if (payment === 'cash' && Number(received) < total)
       return setError('El efectivo recibido no alcanza para cubrir el total.');
     try {
       await window.salesApi.sales.create({
         totalCents: total,
         paymentMethod: payment,
-        amountReceivedCents: payment === 'cash' ? Math.round(Number(received) * 100) : total,
+        amountReceivedCents: payment === 'cash' ? Number(received) : total,
         changeCents: payment === 'cash' ? change : 0,
         items: selected.map((p) => ({
           productId: p.id,
@@ -2533,7 +2637,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="1"
               value={received}
               onChange={(e) => setReceived(e.target.value)}
               placeholder="0,00"
@@ -2619,7 +2723,7 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
   const open = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await window.salesApi.cash.open(Math.round(Number(amount) * 100));
+      await window.salesApi.cash.open(Number(amount));
       setAmount('');
       setMessage('Caja abierta correctamente.');
       await load();
@@ -2631,7 +2735,7 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
   const close = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const result = await window.salesApi.cash.close(Math.round(Number(amount) * 100));
+      const result = await window.salesApi.cash.close(Number(amount));
       setMessage(`Caja cerrada. Diferencia: ${money(result.differenceCents)}`);
       setAmount('');
       await load();
@@ -2644,7 +2748,7 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
     e.preventDefault();
     try {
       await window.salesApi.cash.withdraw({
-        amountCents: Math.round(Number(amount) * 100),
+        amountCents: Number(amount),
         reason,
       });
       setAmount('');
@@ -2697,7 +2801,7 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
                 <input
                   type="number"
                   min="0"
-                  step="0.01"
+                  step="1"
                   required
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -2725,8 +2829,8 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
                 Monto
                 <input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="1"
+                  step="1"
                   required
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -3422,7 +3526,7 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
     if (!description || Number(amount) <= 0) return;
     await window.salesApi.expenses.create({
       description,
-      amountCents: Math.round(Number(amount) * 100),
+      amountCents: Number(amount),
       category,
     });
     setDescription('');
@@ -3455,8 +3559,8 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
               <input
                 required
                 type="number"
-                min="0.01"
-                step="0.01"
+                min="1"
+                step="1"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0,00"

@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const OLLAMA_MODELS = [
   'gpt-oss:20b',
   'gpt-oss:120b',
@@ -46,6 +46,11 @@ function getDatabase() {
   db.pragma('foreign_keys = ON');
   migrate(db);
   return db;
+}
+
+function getBusinessDate() {
+  return getDatabase().prepare("SELECT date('now', 'localtime') AS business_date").get()
+    .business_date;
 }
 
 function migrate(database) {
@@ -159,11 +164,13 @@ function migrate(database) {
       source TEXT,
       metrics_json TEXT NOT NULL DEFAULT '[]',
       tool_call_json TEXT,
+      tool_status TEXT NOT NULL DEFAULT 'pending' CHECK (tool_status IN ('pending', 'claimed', 'completed', 'failed', 'cancelled')),
+      tool_error TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('businessName', 'Pollo & Caja'),
-      ('currency', 'ARS'),
+      ('currency', 'COP'),
       ('lowStockThreshold', '10');
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
@@ -180,6 +187,14 @@ function migrate(database) {
     );
   if (!productColumns.includes('active'))
     database.exec('ALTER TABLE products ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+  const aiMessageColumns = database
+    .prepare('PRAGMA table_info(ai_messages)')
+    .all()
+    .map((column) => column.name);
+  if (!aiMessageColumns.includes('tool_status'))
+    database.exec("ALTER TABLE ai_messages ADD COLUMN tool_status TEXT NOT NULL DEFAULT 'pending'");
+  if (!aiMessageColumns.includes('tool_error'))
+    database.exec('ALTER TABLE ai_messages ADD COLUMN tool_error TEXT');
   const saleColumns = database
     .prepare('PRAGMA table_info(sales)')
     .all()
@@ -718,11 +733,11 @@ function listSales(limit = 100, filters = {}) {
   const conditions = [];
   const params = [];
   if (filters.from) {
-    conditions.push('date(s.created_at) >= date(?)');
+    conditions.push("date(s.created_at, 'localtime') >= date(?)");
     params.push(filters.from);
   }
   if (filters.to) {
-    conditions.push('date(s.created_at) <= date(?)');
+    conditions.push("date(s.created_at, 'localtime') <= date(?)");
     params.push(filters.to);
   }
   if (filters.paymentMethod && filters.paymentMethod !== 'all') {
@@ -744,17 +759,17 @@ function getSalesAnalytics(filters = {}) {
   const sales = listSales(10000, filters);
   const byDay = database
     .prepare(
-      `SELECT date(s.created_at) AS day, COALESCE(SUM(s.total_cents),0) AS total_cents, COALESCE((SELECT SUM(i.cost_total_cents) FROM sale_items i WHERE i.sale_id IN (SELECT id FROM sales WHERE status = 'active' AND date(created_at) = date(s.created_at))),0) AS cost_cents, COUNT(*) AS orders FROM sales s WHERE s.status = 'active' AND date(s.created_at) BETWEEN date(?) AND date(?) GROUP BY date(s.created_at) ORDER BY day`,
+      `SELECT date(s.created_at, 'localtime') AS day, COALESCE(SUM(s.total_cents),0) AS total_cents, COALESCE((SELECT SUM(i.cost_total_cents) FROM sale_items i WHERE i.sale_id IN (SELECT id FROM sales WHERE status = 'active' AND date(created_at, 'localtime') = date(s.created_at, 'localtime'))),0) AS cost_cents, COUNT(*) AS orders FROM sales s WHERE s.status = 'active' AND date(s.created_at, 'localtime') BETWEEN date(?) AND date(?) GROUP BY date(s.created_at, 'localtime') ORDER BY day`,
     )
     .all(filters.from, filters.to);
   const byPayment = database
     .prepare(
-      `SELECT payment_method, COALESCE(SUM(total_cents),0) AS total_cents, COUNT(*) AS orders FROM sales WHERE status = 'active' AND date(created_at) BETWEEN date(?) AND date(?) GROUP BY payment_method`,
+      `SELECT payment_method, COALESCE(SUM(total_cents),0) AS total_cents, COUNT(*) AS orders FROM sales WHERE status = 'active' AND date(created_at, 'localtime') BETWEEN date(?) AND date(?) GROUP BY payment_method`,
     )
     .all(filters.from, filters.to);
   const byProduct = database
     .prepare(
-      `SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents, SUM(cost_total_cents) AS cost_cents, SUM(subtotal_cents - cost_total_cents) AS gross_profit_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE s.status = 'active' AND date(s.created_at) BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY total_cents DESC LIMIT 5`,
+      `SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents, SUM(cost_total_cents) AS cost_cents, SUM(subtotal_cents - cost_total_cents) AS gross_profit_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE s.status = 'active' AND date(s.created_at, 'localtime') BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY total_cents DESC LIMIT 5`,
     )
     .all(filters.from, filters.to);
   const totalCents = sales.reduce((sum, sale) => sum + sale.total_cents, 0);
@@ -979,16 +994,19 @@ function getAiSession(id) {
   if (!session) return null;
   const messages = database
     .prepare(
-      'SELECT role, text, period, source, metrics_json, tool_call_json, created_at FROM ai_messages WHERE session_id = ? ORDER BY id',
+      'SELECT id, role, text, period, source, metrics_json, tool_call_json, tool_status, tool_error, created_at FROM ai_messages WHERE session_id = ? ORDER BY id',
     )
     .all(id)
     .map((message) => ({
+      id: message.id,
       role: message.role,
       text: message.text,
       period: message.period,
       source: message.source,
       metrics: parseAiJson(message.metrics_json, []),
       toolCall: message.tool_call_json ? parseAiJson(message.tool_call_json, null) : null,
+      toolStatus: message.tool_status,
+      toolError: message.tool_error,
       created_at: message.created_at,
     }));
   return { ...session, messages };
@@ -1029,13 +1047,62 @@ function appendAiMessage(input) {
   })();
   return result;
 }
+function validateAiMessageInput(input) {
+  const sessionId = validateAiSessionId(input?.sessionId);
+  const messageId = input?.messageId;
+  if (!Number.isSafeInteger(messageId) || messageId < 1)
+    throw new Error('El mensaje no es válido.');
+  return { sessionId, messageId };
+}
+function claimAiMessage(input) {
+  const { sessionId, messageId } = validateAiMessageInput(input);
+  const database = getDatabase();
+  const result = database
+    .prepare(
+      "UPDATE ai_messages SET tool_status = 'claimed' WHERE id = ? AND session_id = ? AND role = 'assistant' AND tool_call_json IS NOT NULL AND tool_status = 'pending'",
+    )
+    .run(messageId, sessionId);
+  const message = database
+    .prepare('SELECT tool_status FROM ai_messages WHERE id = ? AND session_id = ?')
+    .get(messageId, sessionId);
+  if (!message) throw new Error('El mensaje no existe.');
+  return { claimed: result.changes === 1, status: message.tool_status };
+}
+function completeAiMessage(input) {
+  const { sessionId, messageId } = validateAiMessageInput(input);
+  const status = input?.status;
+  if (status !== 'completed' && status !== 'failed') throw new Error('El estado no es válido.');
+  const error = input?.error == null ? null : validateAiText(input.error).slice(0, 500);
+  const database = getDatabase();
+  const result = database
+    .prepare(
+      "UPDATE ai_messages SET tool_status = ?, tool_error = ? WHERE id = ? AND session_id = ? AND tool_status = 'claimed'",
+    )
+    .run(status, error, messageId, sessionId);
+  if (result.changes !== 1) throw new Error('La propuesta no está en ejecución.');
+  return { messageId, status, error };
+}
+function cancelAiMessage(input) {
+  const { sessionId, messageId } = validateAiMessageInput(input);
+  const database = getDatabase();
+  const result = database
+    .prepare(
+      "UPDATE ai_messages SET tool_status = 'cancelled' WHERE id = ? AND session_id = ? AND tool_status = 'pending'",
+    )
+    .run(messageId, sessionId);
+  const message = database
+    .prepare('SELECT tool_status FROM ai_messages WHERE id = ? AND session_id = ?')
+    .get(messageId, sessionId);
+  if (!message) throw new Error('El mensaje no existe.');
+  return { cancelled: result.changes === 1, status: message.tool_status };
+}
 
 function getSettings() {
   const rows = getDatabase().prepare('SELECT key, value FROM settings').all();
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
   return {
     businessName: values.businessName || 'Pollo & Caja',
-    currency: values.currency || 'ARS',
+    currency: values.currency || 'COP',
     lowStockThreshold: Number(values.lowStockThreshold) || 10,
   };
 }
@@ -1241,7 +1308,7 @@ function getDashboardAlerts() {
       id: 'cash-difference',
       severity: Math.abs(register.difference_cents) >= 1000 ? 'critical' : 'warning',
       title: 'Diferencia de caja detectada',
-      message: `La diferencia registrada es de ${register.difference_cents > 0 ? '+' : ''}$ ${(Math.abs(register.difference_cents) / 100).toLocaleString('es-AR', { minimumFractionDigits: 2 })}.`,
+      message: `La diferencia registrada es de ${register.difference_cents > 0 ? '+' : ''}${Math.abs(register.difference_cents).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}.`,
       page: 'cash',
     });
   const marginProducts = database
@@ -1275,12 +1342,16 @@ function getDashboardAlerts() {
 
 module.exports = {
   getDatabase,
+  getBusinessDate,
   createAiSession,
   getOrCreateAiSession,
   listAiSessions,
   getAiSession,
   deleteAiSession,
   appendAiMessage,
+  claimAiMessage,
+  completeAiMessage,
+  cancelAiMessage,
   listProducts,
   createProduct,
   updateProduct,
