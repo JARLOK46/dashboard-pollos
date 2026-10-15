@@ -244,6 +244,20 @@ button:disabled {
 .delete-modal {
   max-width: 430px;
 }
+.table-clear-backdrop { z-index: 35; }
+.table-clear-modal { width: min(480px, 100%); padding: 26px; border-top: 4px solid #ef4444; }
+.table-clear-icon { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 16px; border-radius: 50%; background: #fff0ef; color: #c9362d; font-family: 'Plus Jakarta Sans'; font-size: 22px; font-weight: 800; }
+.table-clear-heading { align-items: flex-start; margin-bottom: 12px; }
+.table-clear-heading h2 { max-width: 360px; line-height: 1.25; }
+.table-clear-description { margin: 0; color: #667181; font-size: 13px; line-height: 1.55; }
+.table-clear-warning { display: grid; gap: 3px; margin-top: 18px; padding: 12px 14px; border: 1px solid #f2d0cd; border-radius: 9px; background: #fff8f7; color: #8f302a; font-size: 11px; line-height: 1.4; }
+.table-clear-warning span { color: #a4554e; }
+.table-clear-modal .modal-actions { margin-top: 24px; }
+.dark-theme .table-clear-modal { border-color: #ef665d; }
+.dark-theme .table-clear-icon { background: #4a292a; color: #ffaaa4; }
+.dark-theme .table-clear-description { color: #bcc7d4; }
+.dark-theme .table-clear-warning { border-color: #704443; background: #382629; color: #ffb4ad; }
+.dark-theme .table-clear-warning span { color: #e29d96; }
 .delete-explanation {
   color: #687281;
   font-size: 12px;

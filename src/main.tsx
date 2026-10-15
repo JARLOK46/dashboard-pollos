@@ -2878,6 +2878,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
   const [received, setReceived] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const selectedTable = tables.find((table) => table.id === selectedId) ?? null;
   const selected = products.filter((product) => cart[product.id] > 0);
@@ -3014,7 +3015,6 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
   const changeTableCount = async (delta: number) => {
     const nextCount = settings.tableCount + delta;
     if (nextCount < 1 || nextCount > 100) return;
-    if (delta < 0 && !window.confirm(`¿Eliminar Mesa ${settings.tableCount}? Solo se puede quitar si está libre.`)) return;
     setBusy(true);
     setError('');
     try {
@@ -3030,8 +3030,13 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
     }
   };
 
+  const requestClear = () => {
+    if (selectedTable?.order_id) setClearConfirmOpen(true);
+  };
+
   const clear = async () => {
-    if (!selectedTable?.order_id || !window.confirm(`¿Liberar ${selectedTable.name} y descartar su pedido?`)) return;
+    if (!selectedTable?.order_id) return;
+    setClearConfirmOpen(false);
     setBusy(true);
     try {
       await window.salesApi.tables.clearOrder(selectedTable.id);
@@ -3106,12 +3111,58 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
             <div className="payment-tabs"><button className={payment === 'cash' ? 'selected' : ''} onClick={() => setPayment('cash')}>💵 Efectivo</button><button className={payment === 'card' ? 'selected' : ''} onClick={() => setPayment('card')}>💳 Tarjeta</button></div>
             {payment === 'cash' && <label>Efectivo recibido<input type="number" min={total} step="1" value={received} onChange={(event) => setReceived(event.target.value)} placeholder={String(total)} />{Number(received) >= total && <small>Vuelto: {money(change)}</small>}</label>}
             <button className="primary-button full-button" disabled={!selectedTable.order_id || !selected.length || busy || orderDirty} onClick={() => void pay()}>{busy ? 'Procesando…' : 'Cobrar y liberar mesa'}</button>
-            {selectedTable.order_id && <button className="archive-button full-button" disabled={busy} onClick={() => void clear()}>Descartar pedido y liberar mesa</button>}
+            {selectedTable.order_id && <button className="archive-button full-button" disabled={busy} onClick={requestClear}>Descartar pedido y liberar mesa</button>}
             {error && <p className="form-error" role="alert">{error}</p>}
             <small>El inventario se descuenta al cobrar. Los pedidos abiertos reservan unidades para otras mesas.</small>
           </section>
         </div>
       )}
+      {clearConfirmOpen && selectedTable && (
+        <TableClearModal
+          tableName={selectedTable.name}
+          busy={busy}
+          close={() => setClearConfirmOpen(false)}
+          confirm={() => void clear()}
+        />
+      )}
+    </div>
+  );
+}
+
+function TableClearModal({ tableName, busy, close, confirm }: { tableName: string; busy: boolean; close: () => void; confirm: () => void }) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) {
+        event.preventDefault();
+        close();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busy, close]);
+
+  return (
+    <div className="modal-backdrop table-clear-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) close();
+    }}>
+      <div className="modal table-clear-modal" role="dialog" aria-modal="true" aria-labelledby="table-clear-title" aria-describedby="table-clear-description">
+        <div className="table-clear-icon" aria-hidden="true">!</div>
+        <div className="modal-heading table-clear-heading">
+          <div>
+            <p className="modal-kicker">Liberar mesa</p>
+            <h2 id="table-clear-title">¿Descartar el pedido de {tableName}?</h2>
+          </div>
+          <button type="button" aria-label="Cerrar confirmación" onClick={close} disabled={busy}>×</button>
+        </div>
+        <p id="table-clear-description" className="table-clear-description">
+          Se eliminarán los productos y las notas de esta cuenta. La mesa quedará disponible nuevamente.
+        </p>
+        <div className="table-clear-warning"><strong>Esta acción no registra una venta</strong><span>y no se puede deshacer desde el historial.</span></div>
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={close} disabled={busy}>Conservar pedido</button>
+          <button type="button" className="destructive-button" onClick={confirm} disabled={busy}>{busy ? 'Liberando…' : 'Descartar y liberar'}</button>
+        </div>
+      </div>
     </div>
   );
 }
