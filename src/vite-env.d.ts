@@ -93,12 +93,51 @@ declare global {
         }): Promise<Product>;
         movements(productId?: number, limit?: number, filters?: unknown): Promise<unknown[]>;
       };
+      tables: {
+        list(): Promise<Array<{
+          id: number;
+          name: string;
+          active: number;
+          order_id: number | null;
+          customer_name: string | null;
+          notes: string | null;
+          order_created_at: string | null;
+          order_updated_at: string | null;
+          item_count: number;
+          unit_count: number;
+          total_cents: number;
+        }>>;
+        getOrder(tableId: number): Promise<{
+          id: number;
+          table_id: number;
+          table_name: string;
+          customer_name: string;
+          notes: string;
+          items: Array<{ product_id: number; product_name: string; quantity: number; unit_price_cents: number }>;
+        } | null>;
+        saveOrder(input: {
+          tableId: number;
+          customerName: string;
+          notes: string;
+          items: Array<{ productId: number; quantity: number }>;
+        }): Promise<unknown>;
+        clearOrder(tableId: number): Promise<{ tableId: number; cleared: boolean }>;
+        payOrder(input: {
+          tableId: number;
+          paymentMethod: 'cash' | 'card';
+          amountReceivedCents: number;
+          changeCents: number;
+        }): Promise<unknown>;
+      };
       sales: {
         create(input: {
           totalCents: number;
           paymentMethod: 'cash' | 'card';
           amountReceivedCents: number;
           changeCents: number;
+          customerName?: string;
+          notes?: string;
+          tableId?: number;
           items: Array<{
             productId: number;
             productName: string;

@@ -75,6 +75,7 @@ type AiToolCall =
     };
 type Sale = {
   id: number;
+  table_id?: number | null;
   total_cents: number;
   payment_method: 'cash' | 'card';
   amount_received_cents: number;
@@ -89,8 +90,22 @@ type Sale = {
   created_at: string;
   items: SaleItem[];
 };
+type DiningTable = {
+  id: number;
+  name: string;
+  active: number;
+  order_id: number | null;
+  customer_name: string | null;
+  notes: string | null;
+  order_created_at: string | null;
+  order_updated_at: string | null;
+  item_count: number;
+  unit_count: number;
+  total_cents: number;
+};
 type Page =
   | 'dashboard'
+  | 'tables'
   | 'products'
   | 'checkout'
   | 'history'
@@ -170,6 +185,7 @@ function App() {
     lowStockThreshold: 10,
   });
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
+  const [tableOrderDirty, setTableOrderDirty] = useState(false);
   const refresh = async () => {
     const [p, s, d, config, currentAlerts] = await Promise.all([
       window.salesApi.products.list(),
@@ -190,7 +206,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem('pollo-caja-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
-  const navigate = (next: Page) => setPage(next);
+  const navigate = (next: Page) => {
+    if (tableOrderDirty && !window.confirm('Hay un pedido de mesa con cambios sin guardar. ¿Descartarlos y continuar?')) return;
+    if (tableOrderDirty) setTableOrderDirty(false);
+    setPage(next);
+  };
   if (!authenticated)
     return (
       <>
@@ -204,6 +224,8 @@ function App() {
       </>
     );
   const logout = async () => {
+    if (tableOrderDirty && !window.confirm('Hay un pedido de mesa con cambios sin guardar. ¿Descartarlos y cerrar sesión?')) return;
+    if (tableOrderDirty) setTableOrderDirty(false);
     await window.salesApi.auth.logout();
     setAuthenticated(false);
     setPage('dashboard');
@@ -224,8 +246,10 @@ function App() {
             <h1>
               {page === 'dashboard'
                 ? `Buen día, ${settings.businessName} 👋`
-                : page === 'products'
-                  ? 'Productos'
+                : page === 'tables'
+                  ? 'Mesas'
+                  : page === 'products'
+                    ? 'Productos'
                   : page === 'checkout'
                     ? 'Nueva venta'
                     : page === 'settings'
@@ -257,6 +281,15 @@ function App() {
           </div>
         </header>
         {page === 'dashboard' && <Dashboard summary={summary} sales={sales} navigate={navigate} />}
+        {page === 'tables' && (
+          <Tables
+            products={products}
+            onDirtyChange={setTableOrderDirty}
+            onChanged={async () => {
+              await refresh();
+            }}
+          />
+        )}
         {page === 'products' && (
           <Products products={products} refresh={refresh} navigate={navigate} />
         )}
@@ -1705,6 +1738,7 @@ function Sidebar({ page, navigate }: { page: Page; navigate: (p: Page) => void }
       <nav>
         <p className="nav-label">MENÚ PRINCIPAL</p>
         {item('dashboard', '⌂', 'Dashboard')}
+        {item('tables', '▦', 'Mesas')}
         {item('products', '▣', 'Productos')}
         {item('checkout', '▤', 'Nueva venta')}
         {item('history', '◷', 'Historial de ventas')}
@@ -1925,6 +1959,14 @@ function Dashboard({
             </div>
             <span>→</span>
           </button>
+          <button className="quick-action" onClick={() => navigate('tables')}>
+            <span className="action-icon green-icon">▦</span>
+            <div>
+              <strong>Gestionar mesas</strong>
+              <small>Abrir cuentas y cobrar pedidos</small>
+            </div>
+            <span>→</span>
+          </button>
           <button className="quick-action" onClick={() => navigate('products')}>
             <span className="action-icon purple-icon">▣</span>
             <div>
@@ -2049,7 +2091,7 @@ function SalesTable({ sales, onSelect }: { sales: Sale[]; onSelect?: (sale: Sale
         <button className="table-row sale-row" key={s.id} onClick={() => onSelect?.(s)}>
           <span className="sale-id">#{String(s.id).padStart(4, '0')}</span>
           <span className="muted">
-            {s.items.map((i) => `${i.quantity} ${i.product_name}`).join(', ')}
+            {s.table_id ? `Mesa ${s.table_id} · ` : ''}{s.items.map((i) => `${i.quantity} ${i.product_name}`).join(', ')}
           </span>
           <span className="total">{money(s.total_cents)}</span>
           <span>
@@ -2822,6 +2864,217 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
     </div>
   );
 }
+function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
+  const [tables, setTables] = useState<DiningTable[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [cart, setCart] = useState<Record<number, number>>({});
+  const [priceOverrides, setPriceOverrides] = useState<Record<number, number>>({});
+  const [orderDirty, setOrderDirty] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [notes, setNotes] = useState('');
+  const [payment, setPayment] = useState<'cash' | 'card'>('cash');
+  const [received, setReceived] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const selectedTable = tables.find((table) => table.id === selectedId) ?? null;
+  const selected = products.filter((product) => cart[product.id] > 0);
+  const unitPrice = (product: Product) => priceOverrides[product.id] ?? product.price_cents;
+  const total = selected.reduce((sum, product) => sum + unitPrice(product) * cart[product.id], 0);
+  const change = Math.max(0, Math.round(Number(received || 0)) - total);
+
+  const loadTables = async () => setTables(await window.salesApi.tables.list());
+  useEffect(() => {
+    void loadTables().catch((cause) => setError(cause instanceof Error ? cause.message : 'No se pudieron cargar las mesas.'));
+  }, []);
+
+  const selectTable = async (table: DiningTable) => {
+    if (orderDirty && !window.confirm('Hay cambios sin guardar en este pedido. ¿Descartarlos y cambiar de mesa?')) return;
+    setError('');
+    setMessage('');
+    setReceived('');
+    try {
+      const order = await window.salesApi.tables.getOrder(table.id);
+      const nextCart: Record<number, number> = {};
+      const nextPrices: Record<number, number> = {};
+      for (const item of order?.items ?? []) {
+        nextCart[item.product_id] = item.quantity;
+        nextPrices[item.product_id] = item.unit_price_cents;
+      }
+      setSelectedId(table.id);
+      setCart(nextCart);
+      setPriceOverrides(nextPrices);
+      setOrderDirty(false);
+      onDirtyChange(false);
+      setCustomerName(order?.customer_name ?? '');
+      setNotes(order?.notes ?? '');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo abrir el pedido de la mesa.');
+    }
+  };
+
+  const addProduct = (product: Product, delta: number) => {
+    const quantity = Math.max(0, (cart[product.id] ?? 0) + delta);
+    if (quantity > product.stock) {
+      setError(`No hay unidades disponibles adicionales de ${product.name}.`);
+      return;
+    }
+    setOrderDirty(true);
+    onDirtyChange(true);
+    setError('');
+    setCart((current) => ({ ...current, [product.id]: quantity }));
+  };
+
+  const save = async () => {
+    if (!selectedTable || !selected.length) {
+      setError('Agregá al menos un producto antes de guardar el pedido.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const savedOrder = await window.salesApi.tables.saveOrder({
+        tableId: selectedTable.id,
+        customerName: customerName.trim(),
+        notes: notes.trim(),
+        items: selected.map((product) => ({ productId: product.id, quantity: cart[product.id] })),
+      });
+      if (savedOrder && typeof savedOrder === 'object' && 'items' in savedOrder) {
+        const savedItems = (savedOrder as { items: Array<{ product_id: number; unit_price_cents: number }> }).items;
+        setPriceOverrides(Object.fromEntries(savedItems.map((item) => [item.product_id, item.unit_price_cents])));
+      }
+      setOrderDirty(false);
+      onDirtyChange(false);
+      await loadTables();
+      setMessage(`Pedido de ${selectedTable.name} guardado. El stock se descuenta al cobrar.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el pedido.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pay = async () => {
+    if (!selectedTable || !selectedTable.order_id) {
+      setError('Guardá el pedido antes de cobrarlo.');
+      return;
+    }
+    if (orderDirty) {
+      setError('Guardá los cambios del pedido antes de cobrar.');
+      return;
+    }
+    if (payment === 'cash' && (!Number.isSafeInteger(Number(received)) || Number(received) < total)) {
+      setError('El efectivo recibido debe cubrir el total del pedido.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await window.salesApi.tables.payOrder({
+        tableId: selectedTable.id,
+        paymentMethod: payment,
+        amountReceivedCents: payment === 'cash' ? Number(received) : total,
+        changeCents: payment === 'cash' ? change : 0,
+      });
+      setSelectedId(null);
+      setCart({});
+      setPriceOverrides({});
+      setOrderDirty(false);
+      onDirtyChange(false);
+      setCustomerName('');
+      setNotes('');
+      setReceived('');
+      await Promise.all([loadTables(), onChanged()]);
+      setMessage('Cuenta cobrada y venta registrada.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo cobrar el pedido.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async () => {
+    if (!selectedTable?.order_id || !window.confirm(`¿Liberar ${selectedTable.name} y descartar su pedido?`)) return;
+    setBusy(true);
+    try {
+      await window.salesApi.tables.clearOrder(selectedTable.id);
+      setSelectedId(null);
+      setCart({});
+      setPriceOverrides({});
+      setOrderDirty(false);
+      onDirtyChange(false);
+      setCustomerName('');
+      setNotes('');
+      await loadTables();
+      setMessage(`${selectedTable.name} quedó disponible.`);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo liberar la mesa.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="tables-page">
+      <section className="panel tables-overview">
+        <div className="panel-heading">
+          <div><h2>Salón</h2><p>Elegí una mesa para abrir o continuar su cuenta. El pedido queda guardado en este dispositivo.</p></div>
+          <button className="secondary-button" onClick={() => void loadTables()}>Actualizar ↻</button>
+        </div>
+        <div className="tables-grid">
+          {tables.map((table) => (
+            <button key={table.id} className={`dining-table-card ${table.order_id ? 'occupied' : 'available'} ${table.id === selectedId ? 'selected' : ''}`} onClick={() => void selectTable(table)}>
+              <span className="table-card-icon" aria-hidden="true">♧</span>
+              <strong>{table.name}</strong>
+              <span className="table-status">{table.order_id ? 'Ocupada' : 'Disponible'}</span>
+              {table.order_id ? <><span>{table.unit_count} unidades · {table.item_count} productos</span><b>{money(table.total_cents)}</b></> : <small>Tocar para abrir cuenta</small>}
+            </button>
+          ))}
+          {!tables.length && <div className="empty-state">No hay mesas configuradas.</div>}
+        </div>
+        {error && !selectedTable && <p className="form-error" role="alert">{error}</p>}
+        {message && <p className="success-message" role="status">{message}</p>}
+      </section>
+
+      {selectedTable && (
+        <div className="table-service-layout">
+          <section className="panel table-product-panel">
+            <div className="panel-heading"><div><h2>Agregar a {selectedTable.name}</h2><p>Seleccioná los productos para esta cuenta.</p></div></div>
+            <div className="picker-grid">
+              {products.filter((product) => product.stock > 0).map((product) => (
+                <button key={product.id} className="picker-card" onClick={() => addProduct(product, 1)}>
+                  <div className="product-thumb">{product.image_path ? <img src={product.image_path} alt="" /> : '🍗'}</div>
+                  <strong>{product.name}</strong><span>{money(product.price_cents)}</span><small>{product.stock} en inventario</small>
+                </button>
+              ))}
+            </div>
+            {!products.some((product) => product.stock > 0) && <div className="empty-state">No hay productos con stock disponible.</div>}
+          </section>
+          <section className="panel table-order-panel">
+            <div className="panel-heading"><div><h2>Cuenta · {selectedTable.name}</h2><p>{selectedTable.order_id ? 'Pedido abierto' : 'Nueva cuenta'}</p></div><button className="text-button" onClick={() => { if (!orderDirty || window.confirm('Hay cambios sin guardar en este pedido. ¿Descartarlos?')) { setOrderDirty(false); onDirtyChange(false); setSelectedId(null); } }}>Cerrar</button></div>
+            <label>Cliente (opcional)<input maxLength={120} value={customerName} onChange={(event) => { setCustomerName(event.target.value); setOrderDirty(true); onDirtyChange(true); }} placeholder="Nombre del cliente" /></label>
+            <label>Notas<textarea maxLength={500} rows={2} value={notes} onChange={(event) => { setNotes(event.target.value); setOrderDirty(true); onDirtyChange(true); }} placeholder="Indicaciones para la cocina" /></label>
+            <div className="table-order-items">
+              {selected.map((product) => <div className="cart-row" key={product.id}><div><strong>{product.name}</strong><small>{money(unitPrice(product))} c/u</small></div><div className="quantity"><button onClick={() => addProduct(product, -1)}>−</button><b>{cart[product.id]}</b><button disabled={cart[product.id] >= product.stock} onClick={() => addProduct(product, 1)}>+</button></div><strong>{money(unitPrice(product) * cart[product.id])}</strong></div>)}
+              {!selected.length && <div className="empty-state">La cuenta todavía no tiene productos.</div>}
+            </div>
+            <div className="checkout-total"><span>Total</span><strong>{money(total)}</strong></div>
+            <button className="secondary-button full-button" disabled={!selected.length || busy} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar pedido'}</button>
+            <div className="payment-tabs"><button className={payment === 'cash' ? 'selected' : ''} onClick={() => setPayment('cash')}>💵 Efectivo</button><button className={payment === 'card' ? 'selected' : ''} onClick={() => setPayment('card')}>💳 Tarjeta</button></div>
+            {payment === 'cash' && <label>Efectivo recibido<input type="number" min={total} step="1" value={received} onChange={(event) => setReceived(event.target.value)} placeholder={String(total)} />{Number(received) >= total && <small>Vuelto: {money(change)}</small>}</label>}
+            <button className="primary-button full-button" disabled={!selectedTable.order_id || !selected.length || busy || orderDirty} onClick={() => void pay()}>{busy ? 'Procesando…' : 'Cobrar y liberar mesa'}</button>
+            {selectedTable.order_id && <button className="archive-button full-button" disabled={busy} onClick={() => void clear()}>Descartar pedido y liberar mesa</button>}
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <small>El inventario se descuenta al cobrar. Los pedidos abiertos reservan unidades para otras mesas.</small>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Login({ onLogin }: { onLogin: (email: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -3500,6 +3753,7 @@ function SaleDetailModal({
             {sale.payment_method === 'cash' ? '💵 Efectivo' : '💳 Tarjeta'}
           </b>
         </div>
+        {sale.table_id && <div className="sale-payment-row"><span>Mesa</span><b>Mesa {sale.table_id}</b></div>}
         <div className="sale-items-detail">
           <h3>Productos vendidos</h3>
           {sale.items.map((item) => (

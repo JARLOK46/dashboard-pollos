@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const DEFAULT_ADMIN_EMAIL = 'admin@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = 'admin123*';
 const PASSWORD_KEY_LENGTH = 64;
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const AUTOMATIC_BACKUP_RETENTION = 1;
 const AUTOMATIC_BACKUP_PREFIX = 'pollo-caja-auto-';
 const AUTOMATIC_BACKUP_FILENAME = 'automatic-latest.sqlite';
@@ -33,6 +33,9 @@ const REQUIRED_TABLES = [
   'ai_sessions',
   'ai_messages',
   'audit_logs',
+  'dining_tables',
+  'table_orders',
+  'table_order_items',
 ];
 
 let db;
@@ -79,6 +82,7 @@ function migrate(database) {
       change_cents INTEGER NOT NULL DEFAULT 0 CHECK (change_cents >= 0),
       customer_name TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
+      table_id INTEGER REFERENCES dining_tables(id),
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'voided')),
       voided_at TEXT,
       void_reason TEXT,
@@ -89,6 +93,28 @@ function migrate(database) {
       sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id) ON DELETE CASCADE,
       reason TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS dining_tables (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS table_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_id INTEGER NOT NULL UNIQUE REFERENCES dining_tables(id) ON DELETE CASCADE,
+      customer_name TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS table_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL REFERENCES table_orders(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      product_name TEXT NOT NULL,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+      UNIQUE(order_id, product_id)
     );
     CREATE TABLE IF NOT EXISTS sale_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +211,10 @@ function migrate(database) {
       ('businessName', 'Pollo & Caja'),
       ('currency', 'COP'),
       ('lowStockThreshold', '10');
+    INSERT OR IGNORE INTO dining_tables (id, name) VALUES
+      (1, 'Mesa 1'), (2, 'Mesa 2'), (3, 'Mesa 3'), (4, 'Mesa 4'),
+      (5, 'Mesa 5'), (6, 'Mesa 6'), (7, 'Mesa 7'), (8, 'Mesa 8'),
+      (9, 'Mesa 9'), (10, 'Mesa 10'), (11, 'Mesa 11'), (12, 'Mesa 12');
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
     CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created ON inventory_movements(product_id, datetime(created_at) DESC, id DESC);
@@ -220,6 +250,8 @@ function migrate(database) {
     database.exec('ALTER TABLE sales ADD COLUMN voided_at TEXT');
   if (!saleColumns.includes('void_reason'))
     database.exec('ALTER TABLE sales ADD COLUMN void_reason TEXT');
+  if (!saleColumns.includes('table_id'))
+    database.exec('ALTER TABLE sales ADD COLUMN table_id INTEGER REFERENCES dining_tables(id)');
   database.exec(
     'CREATE TABLE IF NOT EXISTS sale_voids (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id) ON DELETE CASCADE, reason TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)',
   );
@@ -629,8 +661,11 @@ function updateProduct(input) {
   validateProductInput(input, true);
   const database = getDatabase();
   const result = database.transaction(() => {
-    const current = database.prepare('SELECT stock FROM products WHERE id = ?').get(input.id);
+    const current = database.prepare('SELECT name, stock FROM products WHERE id = ?').get(input.id);
     if (!current) throw new Error('El producto no existe.');
+    const reserved = database.prepare('SELECT COALESCE(SUM(quantity), 0) AS quantity FROM table_order_items WHERE product_id = ?').get(input.id).quantity;
+    if (input.stock < reserved)
+      throw new Error(`No se puede reducir el stock de ${current.name} por debajo de las ${reserved} unidades reservadas en pedidos de mesas.`);
     const updated = database
       .prepare(
         `UPDATE products SET name = ?, description = ?, price_cents = ?, cost_cents = ?, stock = ?, image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -660,6 +695,8 @@ function updateProduct(input) {
 function archiveProduct(input) {
   if (!Number.isInteger(input?.id) || input.id <= 0) throw new Error('El producto no es válido.');
   const database = getDatabase();
+  const reserved = database.prepare('SELECT COALESCE(SUM(quantity), 0) AS quantity FROM table_order_items WHERE product_id = ?').get(input.id).quantity;
+  if (reserved > 0) throw new Error(`No se puede archivar este producto: hay ${reserved} unidades reservadas en pedidos de mesas.`);
   const result = database
     .prepare(
       'UPDATE products SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND active = 1',
@@ -688,6 +725,9 @@ function adjustProductStock(input) {
     if (!product) throw new Error('El producto no existe.');
     const next = product.stock + input.quantityDelta;
     if (next < 0) throw new Error('El ajuste no puede dejar el stock en negativo.');
+    const reserved = database.prepare('SELECT COALESCE(SUM(quantity), 0) AS quantity FROM table_order_items WHERE product_id = ?').get(input.productId).quantity;
+    if (next < reserved)
+      throw new Error(`El ajuste no puede reducir el stock por debajo de las ${reserved} unidades reservadas en pedidos de mesas.`);
     database
       .prepare('UPDATE products SET stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(next, input.productId);
@@ -727,12 +767,17 @@ function listInventoryMovements(productId, limit = 200, filters = {}) {
     .all(...params, limit);
 }
 
-function createSale(input) {
+function createSale(input, reservationOrderId = null) {
   const database = getDatabase();
   if (!input || !Array.isArray(input.items) || !input.items.length)
     throw new Error('La venta debe incluir al menos un producto.');
   if (!['cash', 'card'].includes(input.paymentMethod))
     throw new Error('El método de pago no es válido.');
+  if (
+    input.tableId != null &&
+    (!Number.isInteger(input.tableId) || !database.prepare('SELECT id FROM dining_tables WHERE id = ? AND active = 1').get(input.tableId))
+  )
+    throw new Error('La mesa indicada no es válida.');
   validateMoney(input.totalCents, 'El total');
   validateMoney(input.amountReceivedCents, 'El efectivo recibido');
   validateMoney(input.changeCents, 'El vuelto');
@@ -740,7 +785,7 @@ function createSale(input) {
     const register = input.paymentMethod === 'cash' ? getOpenCashRegister(database) : null;
     const sale = database
       .prepare(
-        `INSERT INTO sales (total_cents, payment_method, amount_received_cents, change_cents, customer_name, notes) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sales (total_cents, payment_method, amount_received_cents, change_cents, customer_name, notes, table_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.totalCents,
@@ -749,6 +794,7 @@ function createSale(input) {
         input.changeCents,
         input.customerName || '',
         input.notes || '',
+        input.tableId ?? null,
       );
     const insertItem = database.prepare(
       `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price_cents, subtotal_cents, unit_cost_cents, cost_total_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -780,9 +826,21 @@ function createSale(input) {
       if (!Number.isSafeInteger(subtotal) || subtotal !== item.subtotalCents)
         throw new Error('El subtotal de la venta no es válido.');
       calculatedTotal += subtotal;
+      const reserved = database
+        .prepare(
+          `SELECT COALESCE(SUM(quantity), 0) AS quantity FROM table_order_items
+           WHERE product_id = ? AND (? IS NULL OR order_id <> ?)`,
+        )
+        .get(item.productId, reservationOrderId, reservationOrderId).quantity;
+      const stock =
+        database.prepare('SELECT stock FROM products WHERE id = ?').get(item.productId)?.stock ?? 0;
+      if (item.quantity > stock - reserved)
+        throw new Error(
+          `Stock insuficiente para ${product.name}: hay ${Math.max(0, stock - reserved)} disponibles.`,
+        );
       const changed = updateStock.run(item.quantity, item.productId, item.quantity);
       if (changed.changes !== 1)
-        throw new Error(`Insufficient stock for product ${item.productId}`);
+        throw new Error(`Stock insuficiente para ${product.name}.`);
       insertInventoryMovement.run(
         item.productId,
         -item.quantity,
@@ -820,6 +878,135 @@ function createSale(input) {
     return sale.lastInsertRowid;
   })();
   return getSale(Number(create));
+}
+
+function listDiningTables() {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT t.id, t.name, t.active, o.id AS order_id, o.customer_name, o.notes,
+      o.created_at AS order_created_at, o.updated_at AS order_updated_at,
+      COUNT(i.id) AS item_count, COALESCE(SUM(i.quantity), 0) AS unit_count,
+      COALESCE(SUM(i.quantity * i.unit_price_cents), 0) AS total_cents
+    FROM dining_tables t
+    LEFT JOIN table_orders o ON o.table_id = t.id
+    LEFT JOIN table_order_items i ON i.order_id = o.id
+    WHERE t.active = 1
+    GROUP BY t.id, o.id
+    ORDER BY t.id
+  `).all();
+}
+
+function getTableOrder(tableId) {
+  if (!Number.isInteger(tableId) || tableId <= 0) throw new Error('La mesa indicada no es válida.');
+  const database = getDatabase();
+  const order = database.prepare(`
+    SELECT o.*, t.name AS table_name FROM table_orders o
+    JOIN dining_tables t ON t.id = o.table_id WHERE o.table_id = ? AND t.active = 1
+  `).get(tableId);
+  if (!order) return null;
+  return {
+    ...order,
+    items: database.prepare('SELECT product_id, product_name, quantity, unit_price_cents FROM table_order_items WHERE order_id = ? ORDER BY id').all(order.id),
+  };
+}
+
+function saveTableOrder(input) {
+  if (
+    !input ||
+    !Number.isInteger(input.tableId) ||
+    input.tableId <= 0 ||
+    !Array.isArray(input.items) ||
+    !input.items.length ||
+    input.items.length > 100
+  )
+    throw new Error('El pedido debe tener una mesa y entre 1 y 100 productos.');
+  if (
+    typeof input.customerName !== 'string' ||
+    input.customerName.length > 120 ||
+    typeof input.notes !== 'string' ||
+    input.notes.length > 500
+  )
+    throw new Error('Los datos del pedido no son válidos.');
+  const database = getDatabase();
+  const save = database.transaction(() => {
+    const table = database.prepare('SELECT id FROM dining_tables WHERE id = ? AND active = 1').get(input.tableId);
+    if (!table) throw new Error('La mesa indicada no existe.');
+    const existing = database.prepare('SELECT id FROM table_orders WHERE table_id = ?').get(input.tableId);
+    const orderId = existing?.id ?? Number(database.prepare('INSERT INTO table_orders (table_id, customer_name, notes) VALUES (?, ?, ?)').run(input.tableId, input.customerName.trim(), input.notes.trim()).lastInsertRowid);
+    if (existing) database.prepare('UPDATE table_orders SET customer_name = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(input.customerName.trim(), input.notes.trim(), orderId);
+    const oldItems = database.prepare('SELECT product_id, unit_price_cents FROM table_order_items WHERE order_id = ?').all(orderId);
+    const oldPrices = new Map(oldItems.map((item) => [item.product_id, item.unit_price_cents]));
+    const reservedElsewhere = database.prepare(`
+      SELECT product_id, SUM(quantity) AS quantity FROM table_order_items
+      WHERE order_id <> ? GROUP BY product_id
+    `);
+    const reservations = new Map(reservedElsewhere.all(orderId).map((item) => [item.product_id, item.quantity]));
+    database.prepare('DELETE FROM table_order_items WHERE order_id = ?').run(orderId);
+    const findProduct = database.prepare('SELECT id, name, price_cents FROM products WHERE id = ? AND active = 1');
+    const insertItem = database.prepare('INSERT INTO table_order_items (order_id, product_id, product_name, quantity, unit_price_cents) VALUES (?, ?, ?, ?, ?)');
+    const seen = new Set();
+    let orderTotal = 0;
+    for (const item of input.items) {
+      if (!item || !Number.isInteger(item.productId) || !Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 2147483647 || seen.has(item.productId))
+        throw new Error('Los productos del pedido no son válidos.');
+      const product = database.prepare('SELECT id, name, price_cents, stock FROM products WHERE id = ? AND active = 1').get(item.productId);
+      if (!product) throw new Error(`El producto ${item.productId} no existe o está archivado.`);
+      const available = product.stock - (reservations.get(product.id) ?? 0);
+      if (item.quantity > available)
+        throw new Error(`Stock insuficiente para ${product.name}: hay ${Math.max(0, available)} disponibles para nuevos pedidos.`);
+      seen.add(item.productId);
+      const unitPriceCents = oldPrices.get(product.id) ?? product.price_cents;
+      orderTotal += item.quantity * unitPriceCents;
+      if (!Number.isSafeInteger(orderTotal) || orderTotal > 2147483647)
+        throw new Error('El total del pedido supera el monto máximo permitido.');
+      insertItem.run(orderId, product.id, product.name, item.quantity, unitPriceCents);
+    }
+    return getTableOrder(input.tableId);
+  });
+  return save();
+}
+
+function clearTableOrder(tableId) {
+  if (!Number.isInteger(tableId) || tableId <= 0) throw new Error('La mesa indicada no es válida.');
+  const database = getDatabase();
+  const table = database.prepare('SELECT id FROM dining_tables WHERE id = ? AND active = 1').get(tableId);
+  if (!table) throw new Error('La mesa indicada no existe.');
+  const result = database.prepare('DELETE FROM table_orders WHERE table_id = ?').run(tableId);
+  return { tableId, cleared: result.changes > 0 };
+}
+
+function payTableOrder(input) {
+  if (!input || !Number.isInteger(input.tableId) || input.tableId <= 0)
+    throw new Error('La mesa indicada no es válida.');
+  if (!['cash', 'card'].includes(input.paymentMethod))
+    throw new Error('El método de pago no es válido.');
+  validateMoney(input.amountReceivedCents, 'El efectivo recibido');
+  validateMoney(input.changeCents, 'El vuelto');
+  const database = getDatabase();
+  const pay = database.transaction(() => {
+    const order = getTableOrder(input.tableId);
+    if (!order || !order.items.length) throw new Error('La mesa no tiene un pedido abierto.');
+    const totalCents = order.items.reduce((sum, item) => sum + item.quantity * item.unit_price_cents, 0);
+    const sale = createSale({
+      totalCents,
+      paymentMethod: input.paymentMethod,
+      amountReceivedCents: input.amountReceivedCents,
+      changeCents: input.changeCents,
+      customerName: order.customer_name,
+      notes: order.notes,
+      tableId: order.table_id,
+      items: order.items.map((item) => ({
+        productId: item.product_id,
+        productName: item.product_name,
+        quantity: item.quantity,
+        unitPriceCents: item.unit_price_cents,
+        subtotalCents: item.quantity * item.unit_price_cents,
+      })),
+    }, order.id);
+    database.prepare('DELETE FROM table_orders WHERE id = ?').run(order.id);
+    return sale;
+  });
+  return pay();
 }
 
 function voidSale(id, reason) {
@@ -1559,7 +1746,13 @@ module.exports = {
   archiveProduct,
   adjustProductStock,
   listInventoryMovements,
+  closeDatabase,
   createSale,
+  listDiningTables,
+  getTableOrder,
+  saveTableOrder,
+  clearTableOrder,
+  payTableOrder,
   voidSale,
   getSale,
   listSales,

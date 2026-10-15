@@ -3691,3 +3691,34 @@ body {
   .diagnostic-severity { grid-column: 1 / -1; justify-self: start; }
   .search-shortcut { right: 8px; }
 }
+
+.tables-page { display: grid; gap: 20px; }
+.tables-overview { min-width: 0; }
+.tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); gap: 13px; }
+.dining-table-card { min-height: 145px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 7px; padding: 15px; border: 1px solid #e8ecef; border-radius: 12px; background: #fff; color: #333b48; text-align: left; cursor: pointer; transition: border-color .18s, transform .18s, box-shadow .18s; }
+.dining-table-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(40, 50, 60, .08); }
+.dining-table-card.selected { border-color: #f97316; box-shadow: 0 0 0 2px rgba(249, 115, 22, .13); }
+.dining-table-card.available .table-card-icon, .dining-table-card.available .table-status { color: #13966c; }
+.dining-table-card.occupied { border-color: #f4c29f; background: #fffaf6; }
+.dining-table-card.occupied .table-card-icon, .dining-table-card.occupied .table-status { color: #ed7527; }
+.table-card-icon { font-size: 23px; line-height: 1; }
+.dining-table-card strong { font-family: 'Plus Jakarta Sans'; font-size: 14px; }
+.dining-table-card .table-status { font-size: 10px; font-weight: 700; }
+.dining-table-card b { font-size: 12px; }
+.dining-table-card small, .dining-table-card > span:not(.table-card-icon):not(.table-status) { color: #8993a0; font-size: 10px; }
+.table-service-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, .8fr); gap: 20px; align-items: start; }
+.table-product-panel, .table-order-panel { min-width: 0; }
+.table-order-panel { display: grid; gap: 12px; }
+.table-order-panel > label { display: grid; gap: 6px; color: #606a78; font-size: 11px; font-weight: 600; }
+.table-order-panel input, .table-order-panel textarea { width: 100%; padding: 10px 11px; border: 1px solid #e1e6eb; border-radius: 8px; background: #fff; color: #303846; font: inherit; font-weight: 400; }
+.table-order-items { max-height: 330px; overflow-y: auto; }
+.table-order-items .cart-row { grid-template-columns: minmax(90px, 1fr) auto auto; gap: 8px; }
+.table-order-panel > small { color: #8a94a1; font-size: 10px; line-height: 1.5; }
+.dark-theme .dining-table-card { border-color: #334154; background: #1a2432; color: #edf2f7; }
+.dark-theme .dining-table-card.occupied { border-color: #76523d; background: #30271f; }
+.dark-theme .dining-table-card small, .dark-theme .dining-table-card > span:not(.table-card-icon):not(.table-status) { color: #a8b3c2; }
+.dark-theme .table-order-panel > label { color: #c2ccd8; }
+.dark-theme .table-order-panel input, .dark-theme .table-order-panel textarea { border-color: #425064; background: #202b3a; color: #edf2f7; }
+.dark-theme .table-order-panel > small { color: #a8b3c2; }
+@media (max-width: 850px) { .table-service-layout { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .tables-overview, .table-product-panel, .table-order-panel { padding: 16px; } .tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dining-table-card { min-height: 128px; } }

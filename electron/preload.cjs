@@ -10,6 +10,13 @@ contextBridge.exposeInMainWorld('salesApi', {
     movements: (productId, limit, filters) =>
       ipcRenderer.invoke('products:movements', productId, limit, filters),
   },
+  tables: {
+    list: () => ipcRenderer.invoke('tables:list'),
+    getOrder: (tableId) => ipcRenderer.invoke('tables:get-order', tableId),
+    saveOrder: (input) => ipcRenderer.invoke('tables:save-order', input),
+    clearOrder: (tableId) => ipcRenderer.invoke('tables:clear-order', tableId),
+    payOrder: (input) => ipcRenderer.invoke('tables:pay-order', input),
+  },
   sales: {
     create: (input) => ipcRenderer.invoke('sales:create', input),
     void: (id, reason) => ipcRenderer.invoke('sales:void', id, reason),

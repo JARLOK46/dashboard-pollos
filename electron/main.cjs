@@ -388,6 +388,11 @@ function registerIpc() {
   protectedHandle('products:movements', (_event, productId, limit, filters) =>
     database.listInventoryMovements(productId, limit, filters),
   );
+  protectedHandle('tables:list', () => database.listDiningTables());
+  protectedHandle('tables:get-order', (_event, tableId) => database.getTableOrder(tableId));
+  protectedHandle('tables:save-order', (event, input) => { const result = database.saveTableOrder(input); audit(event, 'table.order.save', 'table_order', result.id, { tableId: result.table_id, itemCount: result.items.length }); return result; });
+  protectedHandle('tables:clear-order', (event, tableId) => { const result = database.clearTableOrder(tableId); audit(event, 'table.order.clear', 'dining_table', tableId); return result; });
+  protectedHandle('tables:pay-order', (event, input) => { const result = database.payTableOrder(input); audit(event, 'table.order.pay', 'sale', result.id, { tableId: input.tableId, paymentMethod: result.payment_method, totalCents: result.total_cents }); return result; });
   protectedHandle('sales:create', (event, input) => { const result = database.createSale(input); audit(event, 'sale.create', 'sale', result.id, { paymentMethod: result.payment_method, totalCents: result.total_cents }); return result; });
   protectedHandle('sales:void', (event, id, reason) => { const result = database.voidSale(id, reason); audit(event, 'sale.void', 'sale', id, { reason }); return result; });
   protectedHandle('sales:list', (_event, limit, filters) => database.listSales(limit, filters));
