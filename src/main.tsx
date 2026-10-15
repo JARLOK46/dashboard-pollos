@@ -285,6 +285,7 @@ function App() {
         {page === 'tables' && (
           <Tables
             products={products}
+            settings={settings}
             onDirtyChange={setTableOrderDirty}
             onChanged={async () => {
               await refresh();
@@ -2865,7 +2866,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
     </div>
   );
 }
-function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
+function Tables({ products, settings, onChanged, onDirtyChange }: { products: Product[]; settings: SettingsData; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
   const [tables, setTables] = useState<DiningTable[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [cart, setCart] = useState<Record<number, number>>({});
@@ -3010,6 +3011,25 @@ function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; o
     }
   };
 
+  const changeTableCount = async (delta: number) => {
+    const nextCount = settings.tableCount + delta;
+    if (nextCount < 1 || nextCount > 100) return;
+    if (delta < 0 && !window.confirm(`¿Eliminar Mesa ${settings.tableCount}? Solo se puede quitar si está libre.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      const current = await window.salesApi.settings.get();
+      await window.salesApi.settings.update({ ...current, tableCount: nextCount });
+      await onChanged();
+      await loadTables();
+      setMessage(delta > 0 ? `Mesa ${nextCount} agregada.` : `Mesa ${settings.tableCount} eliminada.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo modificar la cantidad de mesas.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const clear = async () => {
     if (!selectedTable?.order_id || !window.confirm(`¿Liberar ${selectedTable.name} y descartar su pedido?`)) return;
     setBusy(true);
@@ -3035,9 +3055,14 @@ function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; o
   return (
     <div className="tables-page">
       <section className="panel tables-overview">
-        <div className="panel-heading">
+        <div className="panel-heading salon-heading">
           <div><h2>Salón</h2><p>Elegí una mesa para abrir o continuar su cuenta. El pedido queda guardado en este dispositivo.</p></div>
-          <button className="secondary-button" onClick={() => void loadTables()}>Actualizar ↻</button>
+          <div className="table-management-actions">
+            <span>{settings.tableCount} mesas</span>
+            <button className="table-count-button" disabled={busy || settings.tableCount <= 1} onClick={() => void changeTableCount(-1)} aria-label="Eliminar la última mesa">−</button>
+            <button className="table-count-button" disabled={busy || settings.tableCount >= 100} onClick={() => void changeTableCount(1)} aria-label="Agregar una mesa">+</button>
+            <button className="secondary-button" disabled={busy} onClick={() => void loadTables()}>Actualizar ↻</button>
+          </div>
         </div>
         <div className="tables-grid">
           {tables.map((table) => (

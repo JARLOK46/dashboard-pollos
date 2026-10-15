@@ -3694,6 +3694,11 @@ body {
 
 .tables-page { display: grid; gap: 20px; }
 .tables-overview { min-width: 0; }
+.salon-heading { gap: 16px; }
+.table-management-actions { display: flex; align-items: center; gap: 8px; color: #7d8794; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.table-count-button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #e1e6eb; border-radius: 8px; background: #fff; color: #f97316; font-size: 18px; line-height: 1; cursor: pointer; }
+.table-count-button:hover:not(:disabled) { border-color: #f97316; background: #fff7f0; }
+.table-count-button:disabled { cursor: not-allowed; opacity: .45; }
 .tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); gap: 13px; }
 .dining-table-card { min-height: 145px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 7px; padding: 15px; border: 1px solid #e8ecef; border-radius: 12px; background: #fff; color: #333b48; text-align: left; cursor: pointer; transition: border-color .18s, transform .18s, box-shadow .18s; }
 .dining-table-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(40, 50, 60, .08); }
@@ -3714,6 +3719,9 @@ body {
 .table-order-items { max-height: 330px; overflow-y: auto; }
 .table-order-items .cart-row { grid-template-columns: minmax(90px, 1fr) auto auto; gap: 8px; }
 .table-order-panel > small { color: #8a94a1; font-size: 10px; line-height: 1.5; }
+.dark-theme .table-management-actions { color: #a8b3c2; }
+.dark-theme .table-count-button { border-color: #425064; background: #202b3a; color: #ffab73; }
+.dark-theme .table-count-button:hover:not(:disabled) { border-color: #ff9860; background: #30271f; }
 .dark-theme .dining-table-card { border-color: #334154; background: #1a2432; color: #edf2f7; }
 .dark-theme .dining-table-card.occupied { border-color: #76523d; background: #30271f; }
 .dark-theme .dining-table-card small, .dark-theme .dining-table-card > span:not(.table-card-icon):not(.table-status) { color: #a8b3c2; }
@@ -3721,4 +3729,4 @@ body {
 .dark-theme .table-order-panel input, .dark-theme .table-order-panel textarea { border-color: #425064; background: #202b3a; color: #edf2f7; }
 .dark-theme .table-order-panel > small { color: #a8b3c2; }
 @media (max-width: 850px) { .table-service-layout { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .tables-overview, .table-product-panel, .table-order-panel { padding: 16px; } .tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dining-table-card { min-height: 128px; } }
+@media (max-width: 560px) { .tables-overview, .table-product-panel, .table-order-panel { padding: 16px; } .salon-heading { flex-direction: column; } .table-management-actions { width: 100%; flex-wrap: wrap; } .table-management-actions .secondary-button { margin-left: auto; } .tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dining-table-card { min-height: 128px; } }
