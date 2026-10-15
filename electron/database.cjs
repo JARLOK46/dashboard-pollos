@@ -210,7 +210,8 @@ function migrate(database) {
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('businessName', 'Pollo & Caja'),
       ('currency', 'COP'),
-      ('lowStockThreshold', '10');
+      ('lowStockThreshold', '10'),
+      ('tableCount', '12');
     INSERT OR IGNORE INTO dining_tables (id, name) VALUES
       (1, 'Mesa 1'), (2, 'Mesa 2'), (3, 'Mesa 3'), (4, 'Mesa 4'),
       (5, 'Mesa 5'), (6, 'Mesa 6'), (7, 'Mesa 7'), (8, 'Mesa 8'),
@@ -1457,6 +1458,7 @@ function getSettings() {
     businessName: values.businessName || 'Pollo & Caja',
     currency: values.currency || 'COP',
     lowStockThreshold: Number(values.lowStockThreshold) || 10,
+    tableCount: Number(values.tableCount) || 12,
   };
 }
 
@@ -1496,19 +1498,30 @@ function updateSettings(input) {
     .trim()
     .toUpperCase();
   const lowStockThreshold = Number(input.lowStockThreshold);
+  const tableCount = Number(input.tableCount);
   if (!businessName || businessName.length > 100)
     throw new Error('El nombre del negocio debe tener entre 1 y 100 caracteres.');
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error('La moneda debe ser un código de 3 letras.');
   if (!Number.isInteger(lowStockThreshold) || lowStockThreshold < 0 || lowStockThreshold > 100000)
     throw new Error('El umbral de stock no es válido.');
+  if (!Number.isInteger(tableCount) || tableCount < 1 || tableCount > 100)
+    throw new Error('La cantidad de mesas debe estar entre 1 y 100.');
   const database = getDatabase();
   const save = database.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   );
   database.transaction(() => {
+    const occupied = database
+      .prepare('SELECT t.id, t.name FROM dining_tables t JOIN table_orders o ON o.table_id = t.id WHERE t.id > ? AND t.active = 1')
+      .all(tableCount);
+    if (occupied.length)
+      throw new Error(`No se puede reducir a ${tableCount} mesas: ${occupied[0].name} tiene un pedido abierto.`);
     save.run('businessName', businessName);
     save.run('currency', currency);
     save.run('lowStockThreshold', String(lowStockThreshold));
+    save.run('tableCount', String(tableCount));
+    database.prepare('UPDATE dining_tables SET active = CASE WHEN id <= ? THEN 1 ELSE 0 END WHERE id <= 100').run(tableCount);
+    database.prepare("INSERT OR IGNORE INTO dining_tables (id, name, active) SELECT value, 'Mesa ' || value, 1 FROM (WITH RECURSIVE nums(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM nums WHERE value < ?) SELECT value FROM nums) WHERE value <= ?").run(tableCount, tableCount);
   })();
   return getSettings();
 }

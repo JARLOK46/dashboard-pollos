@@ -13,6 +13,11 @@ const database = require('../electron/database.cjs');
 try {
   const tables = database.listDiningTables();
   assert.equal(tables.length, 12, 'se crean doce mesas por defecto');
+  const baseSettings = database.getSettings();
+  assert.equal(baseSettings.tableCount, 12, 'la configuración inicial conserva doce mesas');
+  const expandedSettings = database.updateSettings({ ...baseSettings, tableCount: 15 });
+  assert.equal(expandedSettings.tableCount, 15, 'se puede ampliar la cantidad de mesas');
+  assert.equal(database.listDiningTables().length, 15, 'la ampliación crea mesas activas');
   const product = database.createProduct({ name: 'Pollo asado', description: '', priceCents: 18000, costCents: 8000, stock: 5, imagePath: null });
   const reopenedProduct = database.createProduct({ name: 'Bebida', description: '', priceCents: 4000, costCents: 1000, stock: 4, imagePath: null });
   assert.equal(database.getTableOrder(1), null, 'mesa libre sin pedido');
@@ -44,6 +49,11 @@ try {
   assert.equal(history.at(0).quantity_delta, -2);
   const cardOrder = database.saveTableOrder({ tableId: 2, customerName: '', notes: '', items: [{ productId: reopenedProduct.id, quantity: 2 }] });
   assert.ok(cardOrder);
+  assert.throws(
+    () => database.updateSettings({ ...database.getSettings(), tableCount: 1 }),
+    /Mesa 2 tiene un pedido abierto/,
+    'no se puede reducir mientras una mesa excedente tiene pedido abierto',
+  );
   assert.throws(() => database.payTableOrder({ tableId: 2, paymentMethod: 'bogus', amountReceivedCents: 0, changeCents: 0 }), /método de pago/i);
   assert.ok(database.getTableOrder(2), 'fallo de pago conserva pedido y transacción');
   database.closeCashRegister(50000);
@@ -57,6 +67,9 @@ try {
   assert.equal(clearing.cleared, true);
   assert.equal(database.getTableOrder(3), null);
   assert.equal(database.clearTableOrder(3).cleared, false);
+  const reducedSettings = database.updateSettings({ ...database.getSettings(), tableCount: 10 });
+  assert.equal(reducedSettings.tableCount, 10, 'se puede reducir cuando las mesas excedentes están libres');
+  assert.equal(database.listDiningTables().length, 10, 'la reducción oculta mesas excedentes');
   console.log('table-orders checks passed');
 } finally {
   database.closeDatabase?.();

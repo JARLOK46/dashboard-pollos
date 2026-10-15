@@ -114,7 +114,7 @@ type Page =
   | 'reports'
   | 'settings'
   | 'ai';
-type SettingsData = { businessName: string; currency: string; lowStockThreshold: number };
+type SettingsData = { businessName: string; currency: string; lowStockThreshold: number; tableCount: number };
 type AutomaticBackupStatus = {
   directory: string;
   retention: 1;
@@ -183,6 +183,7 @@ function App() {
     businessName: 'Pollo & Caja',
     currency: 'COP',
     lowStockThreshold: 10,
+    tableCount: 12,
   });
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
   const [tableOrderDirty, setTableOrderDirty] = useState(false);
@@ -2913,16 +2914,53 @@ function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; o
     }
   };
 
+  const persistOrder = async (nextCart: Record<number, number>, announce = true) => {
+    if (!selectedTable) return false;
+    const nextItems = products
+      .filter((item) => nextCart[item.id] > 0)
+      .map((item) => ({ productId: item.id, quantity: nextCart[item.id] }));
+    if (!nextItems.length) return false;
+    setBusy(true);
+    setError('');
+    try {
+      const savedOrder = await window.salesApi.tables.saveOrder({
+        tableId: selectedTable.id,
+        customerName: customerName.trim(),
+        notes: notes.trim(),
+        items: nextItems,
+      });
+      if (savedOrder && typeof savedOrder === 'object' && 'items' in savedOrder) {
+        const savedItems = (savedOrder as { items: Array<{ product_id: number; unit_price_cents: number }> }).items;
+        setPriceOverrides(Object.fromEntries(savedItems.map((item) => [item.product_id, item.unit_price_cents])));
+      }
+      setCart(nextCart);
+      setOrderDirty(false);
+      onDirtyChange(false);
+      await loadTables();
+      if (announce) setMessage(`Pedido de ${selectedTable.name} guardado automáticamente.`);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el pedido.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const addProduct = (product: Product, delta: number) => {
-    const quantity = Math.max(0, (cart[product.id] ?? 0) + delta);
-    if (quantity > product.stock) {
+    if (busy) return;
+    const nextCart = { ...cart, [product.id]: Math.max(0, (cart[product.id] ?? 0) + delta) };
+    if (nextCart[product.id] > product.stock) {
       setError(`No hay unidades disponibles adicionales de ${product.name}.`);
       return;
     }
-    setOrderDirty(true);
-    onDirtyChange(true);
     setError('');
-    setCart((current) => ({ ...current, [product.id]: quantity }));
+    setCart(nextCart);
+    if (delta > 0) void persistOrder(nextCart);
+    else {
+      setOrderDirty(true);
+      onDirtyChange(true);
+    }
   };
 
   const save = async () => {
@@ -2930,29 +2968,7 @@ function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; o
       setError('Agregá al menos un producto antes de guardar el pedido.');
       return;
     }
-    setBusy(true);
-    setError('');
-    setMessage('');
-    try {
-      const savedOrder = await window.salesApi.tables.saveOrder({
-        tableId: selectedTable.id,
-        customerName: customerName.trim(),
-        notes: notes.trim(),
-        items: selected.map((product) => ({ productId: product.id, quantity: cart[product.id] })),
-      });
-      if (savedOrder && typeof savedOrder === 'object' && 'items' in savedOrder) {
-        const savedItems = (savedOrder as { items: Array<{ product_id: number; unit_price_cents: number }> }).items;
-        setPriceOverrides(Object.fromEntries(savedItems.map((item) => [item.product_id, item.unit_price_cents])));
-      }
-      setOrderDirty(false);
-      onDirtyChange(false);
-      await loadTables();
-      setMessage(`Pedido de ${selectedTable.name} guardado. El stock se descuenta al cobrar.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el pedido.');
-    } finally {
-      setBusy(false);
-    }
+    await persistOrder(cart, true);
   };
 
   const pay = async () => {
@@ -3028,7 +3044,7 @@ function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; o
             <button key={table.id} className={`dining-table-card ${table.order_id ? 'occupied' : 'available'} ${table.id === selectedId ? 'selected' : ''}`} onClick={() => void selectTable(table)}>
               <span className="table-card-icon" aria-hidden="true">♧</span>
               <strong>{table.name}</strong>
-              <span className="table-status">{table.order_id ? 'Ocupada' : 'Disponible'}</span>
+              <span className="table-status">{table.order_id ? 'Pendiente de pago' : 'Disponible'}</span>
               {table.order_id ? <><span>{table.unit_count} unidades · {table.item_count} productos</span><b>{money(table.total_cents)}</b></> : <small>Tocar para abrir cuenta</small>}
             </button>
           ))}
@@ -3044,7 +3060,7 @@ function Tables({ products, onChanged, onDirtyChange }: { products: Product[]; o
             <div className="panel-heading"><div><h2>Agregar a {selectedTable.name}</h2><p>Seleccioná los productos para esta cuenta.</p></div></div>
             <div className="picker-grid">
               {products.filter((product) => product.stock > 0).map((product) => (
-                <button key={product.id} className="picker-card" onClick={() => addProduct(product, 1)}>
+                <button key={product.id} className="picker-card" disabled={busy} onClick={() => addProduct(product, 1)}>
                   <div className="product-thumb">{product.image_path ? <img src={product.image_path} alt="" /> : '🍗'}</div>
                   <strong>{product.name}</strong><span>{money(product.price_cents)}</span><small>{product.stock} en inventario</small>
                 </button>
@@ -3442,6 +3458,19 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
               value={form.lowStockThreshold}
               onChange={(e) => setForm({ ...form, lowStockThreshold: Number(e.target.value) })}
             />
+          </label>
+          <label>
+            Cantidad de mesas
+            <input
+              required
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={form.tableCount}
+              onChange={(e) => setForm({ ...form, tableCount: Number(e.target.value) })}
+            />
+            <small className="field-hint">Para reducir la cantidad, primero liberá las mesas con pedidos abiertos.</small>
           </label>
           {message && <p className="success-message">{message}</p>}
           <button className="primary-button">Guardar configuración</button>

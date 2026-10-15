@@ -12,6 +12,7 @@ const AI_LIMITS = {
   sales: 30,
   products: 100,
   expenses: 30,
+  tables: 50,
   contextMessages: 8,
   contextChars: 6000,
 };
@@ -74,6 +75,7 @@ function buildAiSnapshot() {
           ventasRecientes: AI_LIMITS.sales,
           productos: AI_LIMITS.products,
           gastosRecientes: AI_LIMITS.expenses,
+          mesas: AI_LIMITS.tables,
         },
         advertencia:
           'Las listas recientes están truncadas; no representan el total histórico ni semanal.',
@@ -103,6 +105,21 @@ function buildAiSnapshot() {
           margin_percent: price_cents ? ((price_cents - cost_cents) / price_cents) * 100 : 0,
         })),
       gastosRecientes: database.listExpenses(AI_LIMITS.expenses).slice(0, AI_LIMITS.expenses),
+      mesas: database.listDiningTables().slice(0, AI_LIMITS.tables).map((table) => ({
+        id: table.id,
+        nombre: table.name,
+        estado: table.order_id ? 'pendiente_de_pago' : 'disponible',
+        total_pendiente_cents: table.total_cents,
+        unidades: table.unit_count,
+        productos_distintos: table.item_count,
+        pedido: table.order_id
+          ? database.getTableOrder(table.id)?.items.map((item) => ({
+              producto: item.product_name,
+              cantidad: item.quantity,
+              precio_unitario_cents: item.unit_price_cents,
+            }))
+          : [],
+      })),
       reporteCajaHoy: database.getDailyReport(today),
       alertas: database.getDashboardAlerts(),
     }),
@@ -513,7 +530,7 @@ function registerIpc() {
     return result;
   });
   protectedHandle('settings:get', () => database.getSettings());
-  protectedHandle('settings:update', (event, input) => { const result = database.updateSettings(input); audit(event, 'settings.update', 'settings', null, { keys: ['businessName', 'currency', 'lowStockThreshold'] }); return result; });
+  protectedHandle('settings:update', (event, input) => { const result = database.updateSettings(input); audit(event, 'settings.update', 'settings', null, { keys: ['businessName', 'currency', 'lowStockThreshold', 'tableCount'] }); return result; });
   protectedHandle('ai:sessions:list', (_event, limit) => database.listAiSessions(limit));
   protectedHandle('ai:sessions:get', (_event, id) => database.getAiSession(id));
   protectedHandle('ai:sessions:delete', (_event, id) => database.deleteAiSession(id));

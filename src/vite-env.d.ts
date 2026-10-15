@@ -218,12 +218,13 @@ declare global {
         isMaximized(): Promise<boolean>;
       };
       settings: {
-        get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>;
+        get(): Promise<{ businessName: string; currency: string; lowStockThreshold: number; tableCount: number }>;
         update(input: {
           businessName: string;
           currency: string;
           lowStockThreshold: number;
-        }): Promise<{ businessName: string; currency: string; lowStockThreshold: number }>;
+          tableCount: number;
+        }): Promise<{ businessName: string; currency: string; lowStockThreshold: number; tableCount: number }>;
         changePassword(input: {
           currentPassword: string;
           newPassword: string;

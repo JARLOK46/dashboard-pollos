@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "verify:automatic-backup": "node scripts/verify-automatic-backup.cjs",
     "verify:tables": "node scripts/verify-table-orders.cjs",
+    "verify:table-integration": "node scripts/verify-table-integration.cjs",
     "format": "prettier --write --ignore-unknown \"src/**/*\" \"electron/**/*\" \"scripts/**/*\" package.json \"tsconfig*.json\" vite.config.ts",
     "format:check": "prettier --check --ignore-unknown \"src/**/*\" \"electron/**/*\" \"scripts/**/*\" package.json \"tsconfig*.json\" vite.config.ts",
     "dist": "npm run build && electron-builder --win",
