@@ -53,7 +53,7 @@ function buildWorkbook(sales, expenses, report = null, data = {}) {
     ['Margen %', report?.marginPercent ?? ''],
     ['Gastos registrados', expenses.length],
     ['Total de gastos', money(totalExpenses)],
-    ['Resultado neto', money((report?.totalCents ?? totalSales) - totalExpenses)],
+    ['Resultado neto', money((report?.grossProfitCents ?? (report?.totalCents ?? totalSales)) - totalExpenses)],
   ];
   const summarySheet = XLSX.utils.aoa_to_sheet(summary);
   summarySheet['!cols'] = [{ wch: 28 }, { wch: 24 }];

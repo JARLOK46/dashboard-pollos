@@ -1588,6 +1588,7 @@ function getDailyReport(businessDate) {
     costCents,
     grossProfitCents: totalCents - costCents,
     marginPercent: totalCents ? ((totalCents - costCents) / totalCents) * 100 : 0,
+    netResultCents: totalCents - costCents - expensesTotalCents,
     cash: {
       openingCents: register?.opening_cents ?? null,
       expectedCents,

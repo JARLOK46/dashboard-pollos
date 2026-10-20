@@ -30,11 +30,13 @@ A single small chicken shop, one location, primarily counter sales, with one own
 3. Strengthen cash register lifecycle and closure records — complete
 4. Add product costs and historical margin snapshots — complete
 5. Add cash withdrawal movements and daily report visibility — complete
-6. Add daily operational report and export — pending
+6. Add daily operational report and export — complete (commit a166365; daily net-result calculation, report UI card, CSV export line endings and net-result row, corrected XLSX net-result formula)
 7. Add safe backup and restore — complete
-8. Verify commercial flows and package build — pending
+8. Verify commercial flows and package build — complete (commit a166365; typecheck, syntax checks, diff hygiene, production build, and Windows NSIS packaging pass)
 
 ## Evidence
 - Existing app already has products, sales, expenses, cash movements, exports, and SQLite persistence.
-- Persistent settings, secure single-admin authentication, explicit cash closure, product cost snapshots, and safe validated backup/restore are implemented; commercial flow verification remains pending.
-- Task 6 evidence: main-process save/open dialogs expose backup and restore IPC; backups checkpoint WAL and use temporary replacement; restores validate integrity, schema version, and required tables, then replace the active database path while reopening the handle; Settings exposes explicit backup/restore controls and status feedback.
+- Persistent settings, secure single-admin authentication, explicit cash closure, product cost snapshots, safe validated backup/restore, daily operational reporting, and Windows packaging are implemented; the dashboard is ready for manual review.
+- Task 6 evidence: daily reporting is available from the Reportes screen with local business date selection, sales/payment/cost/gross-margin/expense/cash metrics, and net-result estimate. CSV and XLSX exports include the same operational summary; CSV uses real line endings and XLSX calculates net result after cost of sales and expenses.
+- Backup evidence: main-process save/open dialogs expose backup and restore IPC; backups checkpoint WAL and use temporary replacement; restores validate integrity, schema version, and required tables, then replace the active database path while reopening the handle; Settings exposes explicit backup/restore controls and status feedback.
+- Verification evidence: `npm run typecheck`, CJS syntax checks, `git diff --check`, `npm run build`, and `npm run dist` pass. electron-builder generated the unpacked app and NSIS installer on 2026-10-20; installer output is `release/Pollo y Caja Setup 0.1.0.exe` and unpacked output is `release/win-unpacked/Pollo y Caja.exe`.

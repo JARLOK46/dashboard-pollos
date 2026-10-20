@@ -491,9 +491,10 @@ function registerIpc() {
         ['Efectivo', report.paymentSplit.cashCents ],
         ['Tarjeta', report.paymentSplit.cardCents ],
         ['Costo', report.costCents ],
-        ['Ganancia bruta', report.grossProfitCents ],
+        ['Ganancia bruta', report.grossProfitCents],
         ['Margen %', report.marginPercent],
-        ['Gastos', report.expensesTotalCents ],
+        ['Gastos', report.expensesTotalCents],
+        ['Resultado neto', report.netResultCents],
         ['Retiros de efectivo', report.withdrawalsTotalCents ],
         ['Apertura caja', report.cash.openingCents == null ? '' : report.cash.openingCents ],
         ['Esperado caja', report.cash.expectedCents == null ? '' : report.cash.expectedCents ],
@@ -510,7 +511,7 @@ function registerIpc() {
       const escape = (value) => `"${String(value).replaceAll('"', '""')}"`;
       await fs.writeFile(
         result.filePath,
-        rows.map((row) => row.map(escape).join(',')).join('\\n'),
+        rows.map((row) => row.map(escape).join(',')).join('\n'),
         'utf8',
       );
     }

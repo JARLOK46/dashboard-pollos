@@ -4004,6 +4004,13 @@ function Reports() {
               icon="↗"
               tone="green"
             />
+            <StatCard
+              label="Resultado neto"
+              value={money(report.netResultCents)}
+              change="Después de costos y gastos"
+              icon="✓"
+              tone={report.netResultCents >= 0 ? 'green' : 'orange'}
+            />
           </section>
           <div className="content-grid">
             <section className="panel">
