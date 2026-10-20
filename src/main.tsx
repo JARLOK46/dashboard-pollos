@@ -3236,36 +3236,43 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
   const load = async () => setRegister(await window.salesApi.cash.get());
   useEffect(() => {
     load();
   }, []);
   const open = async (e: React.FormEvent) => {
     e.preventDefault();
+    setMessage('');
+    setError('');
     try {
       await window.salesApi.cash.open(Number(amount));
       setAmount('');
       setMessage('Caja abierta correctamente.');
       await load();
       await onChanged();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo abrir la caja.');
+    } catch (cause) {
+      setError(userFacingError(cause, 'No se pudo abrir la caja.'));
     }
   };
   const close = async (e: React.FormEvent) => {
     e.preventDefault();
+    setMessage('');
+    setError('');
     try {
       const result = await window.salesApi.cash.close(Number(amount));
       setMessage(`Caja cerrada. Diferencia: ${money(result.differenceCents)}`);
       setAmount('');
       await load();
       await onChanged();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo cerrar la caja.');
+    } catch (cause) {
+      setError(userFacingError(cause, 'No se pudo cerrar la caja.'));
     }
   };
   const withdraw = async (e: React.FormEvent) => {
     e.preventDefault();
+    setMessage('');
+    setError('');
     try {
       await window.salesApi.cash.withdraw({
         amountCents: Number(amount),
@@ -3276,8 +3283,8 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
       setMessage('Retiro registrado correctamente.');
       await load();
       await onChanged();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo registrar el retiro.');
+    } catch (cause) {
+      setError(userFacingError(cause, 'No se pudo registrar el retiro.'));
     }
   };
   const closed = register?.isClosed;
@@ -3372,7 +3379,8 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
           </form>
         </section>
       )}
-      {message && <p className="success-message">{message}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {message && <p className="success-message" role="status">{message}</p>}
       <section className="panel cash-movements">
         <div className="panel-heading">
           <div>
