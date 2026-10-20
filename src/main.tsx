@@ -143,6 +143,16 @@ const money = (amount: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(
     amount,
   );
+function userFacingError(cause: unknown, fallback: string) {
+  const raw = cause instanceof Error ? cause.message : '';
+  const message = raw
+    .replace(/^Error invoking remote method '[^']+':\s*Error:\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim();
+  if (message.includes('La caja no está abierta'))
+    return 'Para registrar una venta en efectivo, primero abrí la caja desde Control de caja.';
+  return message || fallback;
+}
 function formatAIOutput(text: string) {
   return text
     .replace(/\r\n/g, '\n')
@@ -2733,7 +2743,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
       await window.salesApi.sales.create(input);
       await onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo guardar la venta.');
+      setError(userFacingError(e, 'No se pudo guardar la venta.'));
     } finally {
       setBusy(false);
     }
