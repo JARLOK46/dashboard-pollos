@@ -3068,34 +3068,34 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
   };
 
   return (
-    <div className="tables-page">
-      <section className="panel tables-overview">
-        <div className="panel-heading salon-heading">
-          <div><h2>Salón</h2><p>Elegí una mesa para abrir o continuar su cuenta. El pedido queda guardado en este dispositivo.</p></div>
-          <div className="table-management-actions">
-            <span>{settings.tableCount} mesas</span>
-            <button className="table-count-button" disabled={busy || settings.tableCount <= 1} onClick={() => void changeTableCount(-1)} aria-label="Eliminar la última mesa">−</button>
-            <button className="table-count-button" disabled={busy || settings.tableCount >= 100} onClick={() => void changeTableCount(1)} aria-label="Agregar una mesa">+</button>
-            <button className="secondary-button" disabled={busy} onClick={() => void loadTables()}>Actualizar ↻</button>
+    <div className={`tables-page ${selectedTable ? 'table-sidebar-open' : ''}`}>
+      <div className="tables-main-column">
+        <section className="panel tables-overview">
+          <div className="panel-heading salon-heading">
+            <div><h2>Salón</h2><p>Elegí una mesa para abrir o continuar su cuenta. El pedido queda guardado en este dispositivo.</p></div>
+            <div className="table-management-actions">
+              <span>{settings.tableCount} mesas</span>
+              <button className="table-count-button" disabled={busy || settings.tableCount <= 1} onClick={() => void changeTableCount(-1)} aria-label="Eliminar la última mesa">−</button>
+              <button className="table-count-button" disabled={busy || settings.tableCount >= 100} onClick={() => void changeTableCount(1)} aria-label="Agregar una mesa">+</button>
+              <button className="secondary-button" disabled={busy} onClick={() => void loadTables()}>Actualizar ↻</button>
+            </div>
           </div>
-        </div>
-        <div className="tables-grid">
-          {tables.map((table) => (
-            <button key={table.id} className={`dining-table-card ${table.order_id ? 'occupied' : 'available'} ${table.id === selectedId ? 'selected' : ''}`} onClick={() => void selectTable(table)}>
-              <span className="table-card-icon" aria-hidden="true">♧</span>
-              <strong>{table.name}</strong>
-              <span className="table-status">{table.order_id ? 'Pendiente de pago' : 'Disponible'}</span>
-              {table.order_id ? <><span>{table.unit_count} unidades · {table.item_count} productos</span><b>{money(table.total_cents)}</b></> : <small>Tocar para abrir cuenta</small>}
-            </button>
-          ))}
-          {!tables.length && <div className="empty-state">No hay mesas configuradas.</div>}
-        </div>
-        {error && !selectedTable && <p className="form-error" role="alert">{error}</p>}
-        {message && <p className="success-message" role="status">{message}</p>}
-      </section>
+          <div className="tables-grid">
+            {tables.map((table) => (
+              <button key={table.id} className={`dining-table-card ${table.order_id ? 'occupied' : 'available'} ${table.id === selectedId ? 'selected' : ''}`} onClick={() => void selectTable(table)}>
+                <span className="table-card-icon" aria-hidden="true">♧</span>
+                <strong>{table.name}</strong>
+                <span className="table-status">{table.order_id ? 'Pendiente de pago' : 'Disponible'}</span>
+                {table.order_id ? <><span>{table.unit_count} unidades · {table.item_count} productos</span><b>{money(table.total_cents)}</b></> : <small>Tocar para abrir cuenta</small>}
+              </button>
+            ))}
+            {!tables.length && <div className="empty-state">No hay mesas configuradas.</div>}
+          </div>
+          {error && !selectedTable && <p className="form-error" role="alert">{error}</p>}
+          {message && <p className="success-message" role="status">{message}</p>}
+        </section>
 
-      {selectedTable && (
-        <div className="table-service-layout">
+        {selectedTable && (
           <section className="panel table-product-panel">
             <div className="panel-heading"><div><h2>Agregar a {selectedTable.name}</h2><p>Seleccioná los productos para esta cuenta.</p></div></div>
             <div className="picker-grid">
@@ -3108,24 +3108,27 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
             </div>
             {!products.some((product) => product.stock > 0) && <div className="empty-state">No hay productos con stock disponible.</div>}
           </section>
-          <section className="panel table-order-panel">
-            <div className="panel-heading"><div><h2>Cuenta · {selectedTable.name}</h2><p>{selectedTable.order_id ? 'Pedido abierto' : 'Nueva cuenta'}</p></div><button className="text-button" onClick={() => { if (!orderDirty || window.confirm('Hay cambios sin guardar en este pedido. ¿Descartarlos?')) { setOrderDirty(false); onDirtyChange(false); setSelectedId(null); } }}>Cerrar</button></div>
-            <label>Cliente (opcional)<input maxLength={120} value={customerName} onChange={(event) => { setCustomerName(event.target.value); setOrderDirty(true); onDirtyChange(true); }} placeholder="Nombre del cliente" /></label>
-            <label>Notas<textarea maxLength={500} rows={2} value={notes} onChange={(event) => { setNotes(event.target.value); setOrderDirty(true); onDirtyChange(true); }} placeholder="Indicaciones para la cocina" /></label>
-            <div className="table-order-items">
-              {selected.map((product) => <div className="cart-row" key={product.id}><div><strong>{product.name}</strong><small>{money(unitPrice(product))} c/u</small></div><div className="quantity"><button onClick={() => addProduct(product, -1)}>−</button><b>{cart[product.id]}</b><button disabled={cart[product.id] >= product.stock} onClick={() => addProduct(product, 1)}>+</button></div><strong>{money(unitPrice(product) * cart[product.id])}</strong></div>)}
-              {!selected.length && <div className="empty-state">La cuenta todavía no tiene productos.</div>}
-            </div>
-            <div className="checkout-total"><span>Total</span><strong>{money(total)}</strong></div>
-            <button className="secondary-button full-button" disabled={!selected.length || busy} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar pedido'}</button>
-            <div className="payment-tabs"><button className={payment === 'cash' ? 'selected' : ''} onClick={() => setPayment('cash')}>💵 Efectivo</button><button className={payment === 'card' ? 'selected' : ''} onClick={() => setPayment('card')}>💳 Tarjeta</button></div>
-            {payment === 'cash' && <label>Efectivo recibido<input type="number" min={total} step="1" value={received} onChange={(event) => setReceived(event.target.value)} placeholder={String(total)} />{Number(received) >= total && <small>Vuelto: {money(change)}</small>}</label>}
-            <button className="primary-button full-button" disabled={!selectedTable.order_id || !selected.length || busy || orderDirty} onClick={() => void pay()}>{busy ? 'Procesando…' : 'Cobrar y liberar mesa'}</button>
-            {selectedTable.order_id && <button className="archive-button full-button" disabled={busy} onClick={requestClear}>Descartar pedido y liberar mesa</button>}
-            {error && <p className="form-error" role="alert">{error}</p>}
-            <small>El inventario se descuenta al cobrar. Los pedidos abiertos reservan unidades para otras mesas.</small>
-          </section>
-        </div>
+        )}
+      </div>
+
+      {selectedTable && (
+        <aside className="panel table-order-panel table-order-sidebar" aria-label={`Cuenta de ${selectedTable.name}`}>
+          <div className="panel-heading"><div><h2>Cuenta · {selectedTable.name}</h2><p>{selectedTable.order_id ? 'Pedido abierto' : 'Nueva cuenta'}</p></div><button className="text-button" onClick={() => { if (!orderDirty || window.confirm('Hay cambios sin guardar en este pedido. ¿Descartarlos?')) { setOrderDirty(false); onDirtyChange(false); setSelectedId(null); } }}>Cerrar</button></div>
+          <label>Cliente (opcional)<input maxLength={120} value={customerName} onChange={(event) => { setCustomerName(event.target.value); setOrderDirty(true); onDirtyChange(true); }} placeholder="Nombre del cliente" /></label>
+          <label>Notas<textarea maxLength={500} rows={2} value={notes} onChange={(event) => { setNotes(event.target.value); setOrderDirty(true); onDirtyChange(true); }} placeholder="Indicaciones para la cocina" /></label>
+          <div className="table-order-items">
+            {selected.map((product) => <div className="cart-row" key={product.id}><div><strong>{product.name}</strong><small>{money(unitPrice(product))} c/u</small></div><div className="quantity"><button onClick={() => addProduct(product, -1)}>−</button><b>{cart[product.id]}</b><button disabled={cart[product.id] >= product.stock} onClick={() => addProduct(product, 1)}>+</button></div><strong>{money(unitPrice(product) * cart[product.id])}</strong></div>)}
+            {!selected.length && <div className="empty-state">La cuenta todavía no tiene productos.</div>}
+          </div>
+          <div className="checkout-total"><span>Total</span><strong>{money(total)}</strong></div>
+          <button className="secondary-button full-button" disabled={!selected.length || busy} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar pedido'}</button>
+          <div className="payment-tabs"><button className={payment === 'cash' ? 'selected' : ''} onClick={() => setPayment('cash')}>💵 Efectivo</button><button className={payment === 'card' ? 'selected' : ''} onClick={() => setPayment('card')}>💳 Tarjeta</button></div>
+          {payment === 'cash' && <label>Efectivo recibido<input type="number" min={total} step="1" value={received} onChange={(event) => setReceived(event.target.value)} placeholder={String(total)} />{Number(received) >= total && <small>Vuelto: {money(change)}</small>}</label>}
+          <button className="primary-button full-button" disabled={!selectedTable.order_id || !selected.length || busy || orderDirty} onClick={() => void pay()}>{busy ? 'Procesando…' : 'Cobrar y liberar mesa'}</button>
+          {selectedTable.order_id && <button className="archive-button full-button" disabled={busy} onClick={requestClear}>Descartar pedido y liberar mesa</button>}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <small>El inventario se descuenta al cobrar. Los pedidos abiertos reservan unidades para otras mesas.</small>
+        </aside>
       )}
       {clearConfirmOpen && selectedTable && (
         <TableClearModal

@@ -3900,4 +3900,41 @@ body {
 .dark-theme .table-order-panel input, .dark-theme .table-order-panel textarea { border-color: #425064; background: #202b3a; color: #edf2f7; }
 .dark-theme .table-order-panel > small { color: #a8b3c2; }
 @media (max-width: 850px) { .table-service-layout { grid-template-columns: 1fr; } }
+
+/* Table workspace: the account is a real side panel, so the salon grid always
+   reflows into the remaining column instead of hiding cards underneath it. */
+.tables-page {
+  min-width: 0;
+}
+.tables-main-column {
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+.table-sidebar-open {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  align-items: start;
+}
+.table-order-sidebar {
+  min-width: 0;
+  max-height: calc(100vh - 42px);
+  overflow-y: auto;
+  animation: table-sidebar-in 260ms cubic-bezier(.2, .8, .2, 1) both;
+  will-change: transform, opacity;
+}
+@keyframes table-sidebar-in {
+  from { opacity: 0; transform: translateX(32px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-order-sidebar { animation: none; }
+}
+@media (max-width: 960px) {
+  .table-sidebar-open { grid-template-columns: 1fr; }
+  .table-order-sidebar { max-height: none; }
+}
+@media (max-width: 560px) {
+  .table-sidebar-open { gap: 14px; }
+  .table-order-sidebar { padding: 16px; }
+}
 @media (max-width: 560px) { .tables-overview, .table-product-panel, .table-order-panel { padding: 16px; } .salon-heading { flex-direction: column; } .table-management-actions { width: 100%; flex-wrap: wrap; } .table-management-actions .secondary-button { margin-left: auto; } .tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dining-table-card { min-height: 128px; } }
