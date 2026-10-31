@@ -1114,6 +1114,11 @@ function getSalesAnalytics(filters = {}) {
       `SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents, SUM(cost_total_cents) AS cost_cents, SUM(subtotal_cents - cost_total_cents) AS gross_profit_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE s.status = 'active' AND date(s.created_at, 'localtime') BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY total_cents DESC LIMIT 5`,
     )
     .all(filters.from, filters.to);
+  const byQuantity = database
+    .prepare(
+      `SELECT product_name, SUM(quantity) AS quantity, SUM(subtotal_cents) AS total_cents FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE s.status = 'active' AND date(s.created_at, 'localtime') BETWEEN date(?) AND date(?) GROUP BY product_name ORDER BY quantity DESC, total_cents DESC, product_name LIMIT 4`,
+    )
+    .all(filters.from, filters.to);
   const totalCents = sales.reduce((sum, sale) => sum + sale.total_cents, 0);
   const costCents = sales.reduce(
     (sum, sale) =>
@@ -1125,6 +1130,7 @@ function getSalesAnalytics(filters = {}) {
     byDay,
     byPayment,
     byProduct,
+    byQuantity,
     totalCents,
     costCents,
     grossProfitCents: totalCents - costCents,

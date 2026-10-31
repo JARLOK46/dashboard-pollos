@@ -1829,6 +1829,7 @@ function Dashboard({
 }) {
   const [range, setRange] = useState(defaultRange);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [analyticsState, setAnalyticsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [periodExpenses, setPeriodExpenses] = useState<{
     status: 'loading' | 'ready' | 'error';
     totalCents: number | null;
@@ -1848,7 +1849,23 @@ function Dashboard({
     void loadDiagnostics();
   }, []);
   useEffect(() => {
-    window.salesApi.sales.analytics(range).then(setAnalytics);
+    let current = true;
+    setAnalytics(null);
+    setAnalyticsState('loading');
+    window.salesApi.sales.analytics(range).then(
+      (result) => {
+        if (!current) return;
+        setAnalytics(result);
+        setAnalyticsState('ready');
+      },
+      () => {
+        if (!current) return;
+        setAnalyticsState('error');
+      },
+    );
+    return () => {
+      current = false;
+    };
   }, [range.from, range.to]);
   useEffect(() => {
     let current = true;
@@ -1882,13 +1899,10 @@ function Dashboard({
     const midpoint = (previous.x + point.x) / 2;
     return `${path} C ${midpoint} ${previous.y}, ${midpoint} ${point.y}, ${point.x} ${point.y}`;
   }, '');
-  const bestSellers = sales
-    .flatMap((sale) => sale.items)
-    .reduce<Record<string, number>>((counts, item) => {
-      counts[item.product_name] = (counts[item.product_name] ?? 0) + item.quantity;
-      return counts;
-    }, {});
-  const rankedProducts = Object.entries(bestSellers).sort(([, a], [, b]) => b - a).slice(0, 4);
+  const rankedProducts: Array<readonly [string, number]> = (analytics?.byQuantity ?? []).map(
+    (product: { product_name: string; quantity: number }) =>
+      [product.product_name, product.quantity] as const,
+  );
   return (
     <>
       <div className="analytics-toolbar">
@@ -1919,29 +1933,29 @@ function Dashboard({
       <section className="stats-grid">
         <StatCard
           label="Ventas del período"
-          value={money(total)}
-          change="Filtrado"
+          value={analyticsState === 'ready' ? money(total) : analyticsState === 'loading' ? 'Cargando…' : 'No disponible'}
+          change={analyticsState === 'error' ? 'No se pudo cargar' : 'Filtrado'}
           icon="◉"
           tone="orange"
         />
         <StatCard
           label="Pedidos"
-          value={String(analytics?.orders ?? 0)}
-          change="Filtrado"
+          value={analyticsState === 'ready' ? String(analytics?.orders ?? 0) : analyticsState === 'loading' ? '…' : '—'}
+          change={analyticsState === 'error' ? 'No se pudo cargar' : 'Filtrado'}
           icon="▤"
           tone="purple"
         />
         <StatCard
           label="Ticket promedio"
-          value={money(analytics?.orders ? total / analytics.orders : 0)}
-          change="Del período"
+          value={analyticsState === 'ready' ? money(analytics?.orders ? total / analytics.orders : 0) : analyticsState === 'loading' ? 'Cargando…' : 'No disponible'}
+          change={analyticsState === 'error' ? 'No se pudo cargar' : 'Del período'}
           icon="⌁"
           tone="green"
         />
         <StatCard
           label="Ganancia bruta"
-          value={money(analytics?.grossProfitCents ?? 0)}
-          change={`${(analytics?.marginPercent ?? 0).toFixed(1)}% margen`}
+          value={analyticsState === 'ready' ? money(analytics?.grossProfitCents ?? 0) : analyticsState === 'loading' ? 'Cargando…' : 'No disponible'}
+          change={analyticsState === 'error' ? 'No se pudo cargar' : `${(analytics?.marginPercent ?? 0).toFixed(1)}% margen`}
           icon="↗"
           tone="green"
         />
@@ -2006,12 +2020,16 @@ function Dashboard({
           <div className="panel-heading">
             <div>
               <h2>Más vendidos</h2>
-              <p>Según las ventas cargadas</p>
+              <p>Más unidades vendidas en el período</p>
             </div>
           </div>
-          {rankedProducts.length ? rankedProducts.map(([name, quantity]) => (
+          {analyticsState === 'loading' ? (
+            <p className="muted" role="status">Calculando productos del período…</p>
+          ) : analyticsState === 'error' ? (
+            <p className="form-error" role="alert">No se pudieron cargar los productos más vendidos.</p>
+          ) : rankedProducts.length ? rankedProducts.map(([name, quantity]) => (
             <div className="best-seller-row" key={name}><strong>{name}</strong><span>{quantity} vendidos</span></div>
-          )) : <p className="muted">Todavía no hay ventas para ordenar.</p>}
+          )) : <p className="muted">Todavía no hay ventas en este período.</p>}
           <div className="panel-heading quick-heading">
             <div><h2>Acciones rápidas</h2><p>Lo que más usás</p></div>
           </div>
@@ -2049,7 +2067,11 @@ function Dashboard({
               <p>Las ventas aparecerán aquí al registrar operaciones.</p>
             </div>
           </div>
-          {chartPoints.length === 0 ? (
+          {analyticsState === 'loading' ? (
+            <div className="empty-chart" role="status"><strong>Cargando ventas del período…</strong></div>
+          ) : analyticsState === 'error' ? (
+            <div className="empty-chart form-error" role="alert"><strong>No se pudo cargar la tendencia.</strong></div>
+          ) : chartPoints.length === 0 ? (
             <div className="empty-chart" role="status">
               <span aria-hidden="true">⌁</span>
               <strong>Sin ventas en este período</strong>
@@ -4012,18 +4034,50 @@ function SaleDetailModal({
 function Reports() {
   const [date, setDate] = useState(dateInput(new Date()));
   const [report, setReport] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState('');
   useEffect(() => {
-    window.salesApi.report
-      .daily(date)
-      .then(setReport)
-      .catch((error) =>
-        setMessage(error instanceof Error ? error.message : 'No se pudo cargar el reporte.'),
-      );
+    let current = true;
+    setReport(null);
+    setLoading(true);
+    setError('');
+    setMessage('');
+    window.salesApi.report.daily(date).then(
+      (result) => {
+        if (!current) return;
+        setReport(result);
+        setLoading(false);
+      },
+      (loadError) => {
+        if (!current) return;
+        setError(
+          loadError instanceof Error ? loadError.message : 'No se pudo cargar el reporte.',
+        );
+        setLoading(false);
+      },
+    );
+    return () => {
+      current = false;
+    };
   }, [date]);
   const exportReport = async (format: 'csv' | 'xlsx') => {
-    const result = await window.salesApi.report.export(date, format);
-    if (!result.canceled) setMessage(`Reporte guardado en ${result.filePath}`);
+    setExporting(true);
+    setMessage('');
+    setError('');
+    try {
+      const result = await window.salesApi.report.export(date, format);
+      if (!result.canceled) setMessage(`Reporte guardado en ${result.filePath}`);
+    } catch (exportError) {
+      setError(
+        exportError instanceof Error
+          ? `${exportError.message} Podés intentar exportarlo nuevamente.`
+          : 'No se pudo exportar el reporte. Podés intentar nuevamente.',
+      );
+    } finally {
+      setExporting(false);
+    }
   };
   return (
     <div className="reports-page">
@@ -4034,19 +4088,39 @@ function Reports() {
         </div>
         <label>
           Fecha
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setReport(null);
+              setLoading(true);
+              setError('');
+              setMessage('');
+              setDate(e.target.value);
+            }}
+          />
         </label>
         <div className="export-actions">
-          <button className="secondary-button" onClick={() => exportReport('csv')}>
-            CSV
+          <button
+            className="secondary-button"
+            onClick={() => exportReport('csv')}
+            disabled={exporting}
+          >
+            {exporting ? 'Exportando…' : 'CSV'}
           </button>
-          <button className="primary-button" onClick={() => exportReport('xlsx')}>
-            Exportar XLSX
+          <button
+            className="primary-button"
+            onClick={() => exportReport('xlsx')}
+            disabled={exporting}
+          >
+            {exporting ? 'Exportando…' : 'Exportar XLSX'}
           </button>
         </div>
       </div>
       {message && <p className="success-message">{message}</p>}
-      {report && (
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {loading && <p className="empty-state" role="status">Cargando reporte…</p>}
+      {!loading && !error && report && (
         <>
           <section className="stats-grid">
             <StatCard

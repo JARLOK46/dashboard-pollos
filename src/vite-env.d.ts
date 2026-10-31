@@ -155,6 +155,8 @@ declare global {
           marginPercent: number;
           orders: number;
           byDay: Array<{ day: string; total_cents: number; cost_cents: number; orders: number }>;
+          byProduct: Array<{ product_name: string; quantity: number; total_cents: number; cost_cents: number; gross_profit_cents: number }>;
+          byQuantity: Array<{ product_name: string; quantity: number; total_cents: number }>;
         }>;
         get(id: number): Promise<unknown>;
       };
