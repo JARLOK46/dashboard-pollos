@@ -124,6 +124,7 @@ type AutomaticBackupStatus = {
   lastPath: string | null;
   lastTrigger: string | null;
 };
+type CashRegisterUiStatus = 'loading' | 'open' | 'closed' | 'not-opened' | 'unavailable';
 const OLLAMA_MODELS = [
   { id: 'gpt-oss:20b', label: 'GPT OSS 20B' },
   { id: 'gpt-oss:120b', label: 'GPT OSS 120B' },
@@ -196,20 +197,25 @@ function App() {
     tableCount: 12,
   });
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
+  const [cashStatus, setCashStatus] = useState<CashRegisterUiStatus>('loading');
   const [tableOrderDirty, setTableOrderDirty] = useState(false);
   const refresh = async () => {
-    const [p, s, d, config, currentAlerts] = await Promise.all([
+    const [p, s, d, config, currentAlerts, cash] = await Promise.all([
       window.salesApi.products.list(),
       window.salesApi.sales.list(100),
       window.salesApi.dashboard.summary(),
       window.salesApi.settings.get(),
       window.salesApi.dashboard.alerts(),
+      window.salesApi.cash.get().catch(() => null),
     ]);
     setProducts(p);
     setSales(s as Sale[]);
     setSummary(d as typeof summary);
     setSettings(config);
     setAlerts(currentAlerts as DashboardAlert[]);
+    setCashStatus(
+      !cash ? 'unavailable' : cash.isOpen ? 'open' : cash.isClosed ? 'closed' : 'not-opened',
+    );
   };
   useEffect(() => {
     if (authenticated) void refresh();
@@ -244,12 +250,13 @@ function App() {
     setProducts([]);
     setSales([]);
     setSummary(null);
+    setCashStatus('loading');
   };
   return (
     <div className={darkMode ? 'app-shell dark-theme' : 'app-shell'}>
       <TitleBar />
       <div className="theme-shell" />
-      <Sidebar page={page} navigate={navigate} />
+      <Sidebar page={page} navigate={navigate} cashStatus={cashStatus} />
       <main className="main-content">
         <header className={`topbar ${page === 'dashboard' ? 'service-pulse' : ''}`}>
           <div>
@@ -1731,7 +1738,23 @@ function ProfileMenu({
     </div>
   );
 }
-function Sidebar({ page, navigate }: { page: Page; navigate: (p: Page) => void }) {
+function Sidebar({
+  page,
+  navigate,
+  cashStatus,
+}: {
+  page: Page;
+  navigate: (p: Page) => void;
+  cashStatus: CashRegisterUiStatus;
+}) {
+  const cashStatusCopy: Record<CashRegisterUiStatus, [string, string]> = {
+    loading: ['Verificando caja', 'Consultando estado'],
+    open: ['Caja abierta', 'Lista para operar'],
+    closed: ['Caja cerrada', 'Jornada finalizada'],
+    'not-opened': ['Caja sin abrir', 'Abrí la caja para operar'],
+    unavailable: ['Estado desconocido', 'No se pudo consultar la caja'],
+  };
+  const [cashStatusLabel, cashStatusDescription] = cashStatusCopy[cashStatus];
   const item = (p: Page, icon: string, label: string) => (
     <button className={`nav-item ${page === p ? 'active' : ''}`} onClick={() => navigate(p)}>
       <span>{icon}</span>
@@ -1783,10 +1806,10 @@ function Sidebar({ page, navigate }: { page: Page; navigate: (p: Page) => void }
         </button>
       </nav>
       <div className="sidebar-footer">
-        <div className="status-dot" />
-        <span>Caja abierta</span>
+        <div className={`status-dot status-dot-status-${cashStatus}`} aria-hidden="true" />
+        <span>{cashStatusLabel}</span>
         <b>Operación local</b>
-        <small>Servicio activo</small>
+        <small>{cashStatusDescription}</small>
       </div>
     </aside>
   );
