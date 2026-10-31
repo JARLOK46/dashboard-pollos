@@ -184,6 +184,7 @@ function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [salesRefreshVersion, setSalesRefreshVersion] = useState(0);
   const [summary, setSummary] = useState<{
     salesTodayCents: number;
     ordersToday: number;
@@ -210,6 +211,7 @@ function App() {
     ]);
     setProducts(p);
     setSales(s as Sale[]);
+    setSalesRefreshVersion((version) => version + 1);
     setSummary(d as typeof summary);
     setSettings(config);
     setAlerts(currentAlerts as DashboardAlert[]);
@@ -325,7 +327,9 @@ function App() {
             }}
           />
         )}
-        {page === 'history' && <History sales={sales} onVoided={refresh} />}
+        {page === 'history' && (
+          <History sales={sales} salesRefreshVersion={salesRefreshVersion} onVoided={refresh} />
+        )}
         {page === 'reports' && <Reports />}
         {page === 'expenses' && <Expenses onChanged={refresh} />}
         {page === 'cash' && <CashRegister onChanged={refresh} />}
@@ -3780,7 +3784,15 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
     </section>
   );
 }
-function History({ sales, onVoided }: { sales: Sale[]; onVoided: () => Promise<void> }) {
+function History({
+  sales,
+  salesRefreshVersion,
+  onVoided,
+}: {
+  sales: Sale[];
+  salesRefreshVersion: number;
+  onVoided: () => Promise<void>;
+}) {
   const [message, setMessage] = useState('');
   const [range, setRange] = useState(defaultRange);
   const [payment, setPayment] = useState<'all' | 'cash' | 'card'>('all');
@@ -3791,7 +3803,7 @@ function History({ sales, onVoided }: { sales: Sale[]; onVoided: () => Promise<v
     window.salesApi.sales
       .list(10000, { ...range, paymentMethod: payment, status })
       .then((result) => setFiltered(result as Sale[]));
-  }, [range.from, range.to, payment, status, sales.length]);
+  }, [range.from, range.to, payment, status, salesRefreshVersion]);
   const exportData = async (format: 'csv' | 'xlsx') => {
     const result = await window.salesApi.export(format, { ...range, paymentMethod: payment, status });
     if (!result.canceled) setMessage(`Archivo guardado en ${result.filePath}`);
@@ -4306,7 +4318,7 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
         <div className="panel-heading">
           <div>
             <h2>Gastos registrados</h2>
-            <p>Últimos egresos de la operación.</p>
+            <p>Se muestran los últimos 100 egresos de la operación.</p>
           </div>
         </div>
         {expenses.length ? (
