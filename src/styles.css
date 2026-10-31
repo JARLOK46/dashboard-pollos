@@ -1768,16 +1768,16 @@ body {
 .status-dot {
   animation: soft-pulse 2.4s infinite;
 }
-.status-dot-status-open {
+.sidebar-footer .status-dot.status-dot-status-open {
   background: #22c55e;
 }
-.status-dot-status-closed {
+.sidebar-footer .status-dot.status-dot-status-closed {
   background: #8491a3;
   animation: none;
 }
-.status-dot-status-not-opened,
-.status-dot-status-loading,
-.status-dot-status-unavailable {
+.sidebar-footer .status-dot.status-dot-status-not-opened,
+.sidebar-footer .status-dot.status-dot-status-loading,
+.sidebar-footer .status-dot.status-dot-status-unavailable {
   background: #f59e0b;
   animation: none;
 }

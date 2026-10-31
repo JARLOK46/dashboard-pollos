@@ -276,7 +276,11 @@ function App() {
                         ? 'Reportes'
                         : page === 'ai'
                           ? 'Asistente IA'
-                          : 'Historial de ventas'}
+                          : page === 'cash'
+                            ? 'Caja'
+                            : page === 'expenses'
+                              ? 'Gastos'
+                              : 'Historial de ventas'}
             </h1>
             <p className="subtitle">
               {page === 'dashboard'
