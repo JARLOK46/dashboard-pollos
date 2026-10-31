@@ -174,8 +174,48 @@ const defaultRange = () => {
   from.setDate(to.getDate() - 6);
   return { from: dateInput(from), to: dateInput(to) };
 };
+const FONT_SCALE_STORAGE_KEY = 'pollo-caja-font-scale';
+const DEFAULT_FONT_SCALE = 100;
+const clampFontScale = (value: number) =>
+  Math.min(140, Math.max(85, Math.round(value / 5) * 5));
+const loadFontScale = () => {
+  try {
+    const stored = Number(localStorage.getItem(FONT_SCALE_STORAGE_KEY));
+    return Number.isFinite(stored) && stored !== 0 ? clampFontScale(stored) : DEFAULT_FONT_SCALE;
+  } catch {
+    return DEFAULT_FONT_SCALE;
+  }
+};
+const ICON_ONLY_SELECTOR = /(?:^|[\s>+~])(?:\.icon-button|\.theme-toggle|\.brand-mark|\.stat-icon|\.action-icon|\.product-thumb|\.product-image|\.search-icon|\.diagnostic-arrow|\.empty-chart\s+span|\.table-clear-icon|\.card-menu|\.notification-button|\.nav-item\s+span|\.window-controls\s+button|\.modal-heading\s+button)(?=$|[\s.#:[>+~])/;
+function scaleStylesheetFontSizes() {
+  const visit = (rules: CSSRuleList) => {
+    for (const rule of Array.from(rules)) {
+      if (rule instanceof CSSStyleRule && rule.style.fontSize) {
+        const selectors = rule.selectorText.split(',').map((selector) => selector.trim());
+        if (selectors.some((selector) => ICON_ONLY_SELECTOR.test(selector))) continue;
+        const current = rule.style.getPropertyValue('font-size');
+        if (!current.includes('var(--text-scale')) {
+          rule.style.setProperty(
+            'font-size',
+            `calc((${current}) * var(--text-scale, 1))`,
+            rule.style.getPropertyPriority('font-size'),
+          );
+        }
+      }
+      if (rule instanceof CSSGroupingRule) visit(rule.cssRules);
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      if (sheet.cssRules) visit(sheet.cssRules);
+    } catch {
+      // Ignore inaccessible third-party stylesheets; renderer styles are same-origin.
+    }
+  }
+}
 
 function App() {
+  const [fontScale, setFontScale] = useState(loadFontScale);
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem('pollo-caja-theme') === 'dark',
   );
@@ -225,6 +265,17 @@ function App() {
   useEffect(() => {
     localStorage.setItem('pollo-caja-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
+  useEffect(() => {
+    const scale = clampFontScale(fontScale);
+    document.documentElement.style.setProperty('--text-scale', String(scale / 100));
+    document.documentElement.toggleAttribute('data-font-scale-large', scale > DEFAULT_FONT_SCALE);
+    scaleStylesheetFontSizes();
+    try {
+      localStorage.setItem(FONT_SCALE_STORAGE_KEY, String(scale));
+    } catch {
+      // Keep the live preference active for this session if storage is unavailable.
+    }
+  }, [fontScale]);
   const navigate = (next: Page) => {
     if (tableOrderDirty && !window.confirm('Hay un pedido de mesa con cambios sin guardar. ¿Descartarlos y continuar?')) return;
     if (tableOrderDirty) setTableOrderDirty(false);
@@ -335,6 +386,8 @@ function App() {
         {page === 'cash' && <CashRegister onChanged={refresh} />}
         {page === 'settings' && (
           <Settings
+            fontScale={fontScale}
+            onFontScaleChange={setFontScale}
             settings={settings}
             onSaved={async () => {
               await refresh();
@@ -3503,7 +3556,17 @@ function CashRegister({ onChanged }: { onChanged: () => Promise<void> }) {
     </div>
   );
 }
-function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () => Promise<void> }) {
+function Settings({
+  settings,
+  onSaved,
+  fontScale,
+  onFontScaleChange,
+}: {
+  settings: SettingsData;
+  onSaved: () => Promise<void>;
+  fontScale: number;
+  onFontScaleChange: (scale: number) => void;
+}) {
   const [form, setForm] = useState(settings);
   const [aiConfig, setAiConfig] = useState<{
     model: string;
@@ -3629,6 +3692,39 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
   };
   return (
     <section className="settings-grid">
+      <div className="panel settings-card font-scale-card">
+        <div className="panel-heading">
+          <div>
+            <h2>Tamaño del texto</h2>
+            <p>Se aplica a textos y números en este equipo, sin ampliar iconos ni espacios.</p>
+          </div>
+        </div>
+        <label htmlFor="font-scale-range">Tamaño: {fontScale}%</label>
+        <input
+          id="font-scale-range"
+          className="font-scale-range"
+          type="range"
+          min={85}
+          max={140}
+          step={5}
+          value={fontScale}
+          aria-label="Tamaño del texto"
+          aria-valuetext={`${fontScale}%`}
+          aria-describedby="font-scale-help"
+          onChange={(event) => onFontScaleChange(clampFontScale(Number(event.target.value)))}
+        />
+        <p id="font-scale-help" className="settings-note" aria-live="polite">
+          Vista previa activa: {fontScale}%. El cambio se guarda solo en este dispositivo.
+        </p>
+        <button
+          type="button"
+          className="secondary-button font-scale-reset"
+          disabled={fontScale === DEFAULT_FONT_SCALE}
+          onClick={() => onFontScaleChange(DEFAULT_FONT_SCALE)}
+        >
+          Restablecer
+        </button>
+      </div>
       <div className="panel settings-card">
         <div className="panel-heading">
           <div>

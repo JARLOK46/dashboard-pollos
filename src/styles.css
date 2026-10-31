@@ -3957,3 +3957,50 @@ body {
 @media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 360px) { .stats-grid { grid-template-columns: 1fr; } }
+
+/* Preserve established layouts at 100%; enable additional reflow only above default size. */
+.font-scale-range { accent-color: #c95722; }
+.font-scale-reset { margin-top: 4px; }
+:root[data-font-scale-large] .font-scale-card,
+:root[data-font-scale-large] .settings-card,
+:root[data-font-scale-large] .settings-card label,
+:root[data-font-scale-large] .settings-card p,
+:root[data-font-scale-large] .settings-card input,
+:root[data-font-scale-large] .settings-card button,
+:root[data-font-scale-large] .panel,
+:root[data-font-scale-large] .stat-card,
+:root[data-font-scale-large] .product-card,
+:root[data-font-scale-large] .table-row,
+:root[data-font-scale-large] .topbar,
+:root[data-font-scale-large] .page-actions { min-width: 0; }
+:root[data-font-scale-large] .settings-card,
+:root[data-font-scale-large] .panel,
+:root[data-font-scale-large] .stat-card,
+:root[data-font-scale-large] .product-card,
+:root[data-font-scale-large] .table-row,
+:root[data-font-scale-large] .quick-action,
+:root[data-font-scale-large] .about-row,
+:root[data-font-scale-large] .expense-row { overflow-wrap: anywhere; }
+:root[data-font-scale-large] .settings-grid,
+:root[data-font-scale-large] .product-grid,
+:root[data-font-scale-large] .checkout-layout,
+:root[data-font-scale-large] .content-grid,
+:root[data-font-scale-large] .bottom-grid,
+:root[data-font-scale-large] .expenses-layout,
+:root[data-font-scale-large] .cash-summary { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+:root[data-font-scale-large] .topbar,
+:root[data-font-scale-large] .page-actions,
+:root[data-font-scale-large] .modal-actions,
+:root[data-font-scale-large] .export-actions,
+:root[data-font-scale-large] .history-filterbar,
+:root[data-font-scale-large] .analytics-toolbar { flex-wrap: wrap; }
+:root[data-font-scale-large] .picker-card strong,
+:root[data-font-scale-large] .picker-card span,
+:root[data-font-scale-large] .picker-card small { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+:root[data-font-scale-large] .cart-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+@media (max-width: 560px) {
+  :root[data-font-scale-large] .topbar { gap: 14px; }
+  :root[data-font-scale-large] .top-actions { flex-wrap: wrap; gap: 9px; }
+  :root[data-font-scale-large] .main-content { padding-left: 16px; padding-right: 16px; }
+  :root[data-font-scale-large] .form-row { grid-template-columns: minmax(0, 1fr); }
+}
