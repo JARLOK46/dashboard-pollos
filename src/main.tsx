@@ -114,7 +114,7 @@ type Page =
   | 'reports'
   | 'settings'
   | 'ai';
-type SettingsData = { businessName: string; currency: string; lowStockThreshold: number; tableCount: number };
+type SettingsData = { businessName: string; currency: 'COP'; lowStockThreshold: number; tableCount: number };
 type AutomaticBackupStatus = {
   directory: string;
   retention: 1;
@@ -3523,7 +3523,11 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await window.salesApi.settings.update(form);
+      await window.salesApi.settings.update({
+        businessName: form.businessName,
+        lowStockThreshold: form.lowStockThreshold,
+        tableCount: form.tableCount,
+      });
       setMessage('Configuración guardada.');
       await onSaved();
     } catch (error) {
@@ -3589,13 +3593,9 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
             />
           </label>
           <label>
-            Moneda
-            <input
-              required
-              maxLength={3}
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
-            />
+            Moneda de operación
+            <input value="COP" readOnly aria-describedby="currency-fixed-note" />
+            <small id="currency-fixed-note">Los importes se guardan y muestran en pesos colombianos.</small>
           </label>
           <label>
             Alerta de stock bajo

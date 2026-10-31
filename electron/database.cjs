@@ -212,6 +212,7 @@ function migrate(database) {
       ('currency', 'COP'),
       ('lowStockThreshold', '10'),
       ('tableCount', '12');
+    UPDATE settings SET value = 'COP' WHERE key = 'currency' AND value <> 'COP';
     INSERT OR IGNORE INTO dining_tables (id, name) VALUES
       (1, 'Mesa 1'), (2, 'Mesa 2'), (3, 'Mesa 3'), (4, 'Mesa 4'),
       (5, 'Mesa 5'), (6, 'Mesa 6'), (7, 'Mesa 7'), (8, 'Mesa 8'),
@@ -1472,7 +1473,7 @@ function getSettings() {
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
   return {
     businessName: values.businessName || 'Pollo & Caja',
-    currency: values.currency || 'COP',
+    currency: 'COP',
     lowStockThreshold: Number(values.lowStockThreshold) || 10,
     tableCount: Number(values.tableCount) || 12,
   };
@@ -1510,9 +1511,9 @@ function updateOllamaConfigured(configured) {
 
 function updateSettings(input) {
   const businessName = String(input.businessName || '').trim();
-  const currency = String(input.currency || '')
-    .trim()
-    .toUpperCase();
+  if (input.currency != null && String(input.currency).trim().toUpperCase() !== 'COP')
+    throw new Error('La moneda de operación está fijada en COP.');
+  const currency = 'COP';
   const lowStockThreshold = Number(input.lowStockThreshold);
   const tableCount = Number(input.tableCount);
   if (!businessName || businessName.length > 100)
