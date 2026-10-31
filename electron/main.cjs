@@ -417,6 +417,7 @@ function registerIpc() {
   protectedHandle('sales:get', (_event, id) => database.getSale(id));
   protectedHandle('expenses:create', (event, input) => { const result = database.createExpense(input); audit(event, 'expense.create', 'expense', result.id, { amountCents: result.amount_cents, category: result.category }); return result; });
   protectedHandle('expenses:list', (_event, limit) => database.listExpenses(limit));
+  protectedHandle('expenses:total', (_event, filters) => database.getExpensesTotal(filters));
   protectedHandle('cash:withdraw', (event, input) => { const result = database.createWithdrawal(input); audit(event, 'cash.withdrawal', 'cash_movement', result.id, { amountCents: input.amountCents }); return result; });
   protectedHandle('dashboard:summary', () => database.getDashboardSummary());
   protectedHandle('dashboard:alerts', () => database.getDashboardAlerts());

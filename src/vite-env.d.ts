@@ -166,6 +166,7 @@ declare global {
           category: string;
         }): Promise<unknown>;
         list(limit?: number): Promise<unknown[]>;
+        total(filters?: { from?: string; to?: string }): Promise<number>;
       };
       dashboard: {
         summary(): Promise<unknown>;

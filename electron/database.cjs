@@ -1205,6 +1205,22 @@ function listExpenses(limit = 100, filters = {}) {
     .prepare(`SELECT * FROM expenses ${where} ORDER BY datetime(created_at) DESC LIMIT ?`)
     .all(...params, limit);
 }
+function getExpensesTotal(filters = {}) {
+  const conditions = [];
+  const params = [];
+  if (filters.from) {
+    conditions.push("date(created_at, 'localtime') >= date(?)");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    conditions.push("date(created_at, 'localtime') <= date(?)");
+    params.push(filters.to);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return getDatabase()
+    .prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS total_cents FROM expenses ${where}`)
+    .get(...params).total_cents;
+}
 function getOpenCashRegister(database = getDatabase()) {
   const register = database
     .prepare(
@@ -1774,6 +1790,7 @@ module.exports = {
   createExpense,
   createWithdrawal,
   listExpenses,
+  getExpensesTotal,
   getDailyReport,
   getDashboardSummary,
   getDashboardAlerts,

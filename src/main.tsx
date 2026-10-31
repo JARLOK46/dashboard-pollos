@@ -1829,6 +1829,10 @@ function Dashboard({
 }) {
   const [range, setRange] = useState(defaultRange);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [periodExpenses, setPeriodExpenses] = useState<{
+    status: 'loading' | 'ready' | 'error';
+    totalCents: number | null;
+  }>({ status: 'loading', totalCents: null });
   const [diagnostics, setDiagnostics] = useState<Awaited<ReturnType<typeof window.salesApi.diagnostics.list>>>([]);
   const [diagnosticsState, setDiagnosticsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const loadDiagnostics = async () => {
@@ -1845,6 +1849,21 @@ function Dashboard({
   }, []);
   useEffect(() => {
     window.salesApi.sales.analytics(range).then(setAnalytics);
+  }, [range.from, range.to]);
+  useEffect(() => {
+    let current = true;
+    setPeriodExpenses({ status: 'loading', totalCents: null });
+    window.salesApi.expenses.total(range).then(
+      (totalCents) => {
+        if (current) setPeriodExpenses({ status: 'ready', totalCents });
+      },
+      () => {
+        if (current) setPeriodExpenses({ status: 'error', totalCents: null });
+      },
+    );
+    return () => {
+      current = false;
+    };
   }, [range.from, range.to]);
   const total = analytics?.totalCents ?? summary?.salesTodayCents ?? 0;
   const chartData = (analytics?.byDay ?? []).map((day: any) => ({
@@ -1927,9 +1946,15 @@ function Dashboard({
           tone="green"
         />
         <StatCard
-          label="Gastos del día"
-          value={money(summary?.expensesTodayCents ?? 0)}
-          change="Hoy"
+          label="Gastos del período"
+          value={
+            periodExpenses.status === 'ready'
+              ? money(periodExpenses.totalCents ?? 0)
+              : periodExpenses.status === 'loading'
+                ? 'Cargando…'
+                : 'No disponible'
+          }
+          change={periodExpenses.status === 'error' ? 'No se pudo cargar' : 'Del período'}
           icon="↗"
           tone="red"
         />

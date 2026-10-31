@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('salesApi', {
   expenses: {
     create: (input) => ipcRenderer.invoke('expenses:create', input),
     list: (limit) => ipcRenderer.invoke('expenses:list', limit),
+    total: (filters) => ipcRenderer.invoke('expenses:total', filters),
   },
   dashboard: {
     summary: () => ipcRenderer.invoke('dashboard:summary'),
