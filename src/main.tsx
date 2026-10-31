@@ -2861,7 +2861,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
               onClick={() => add(p, 1)}
             >
               <div className="product-thumb">
-                {p.image_path ? <img src={p.image_path} /> : '🍗'}
+                {p.image_path ? <img src={p.image_path} alt={p.name} /> : '🍗'}
               </div>
               <strong>{p.name}</strong>
               <span>{money(p.price_cents)}</span>
@@ -2957,6 +2957,7 @@ function Checkout({ products, onSaved }: { products: Product[]; onSaved: () => P
 function Tables({ products, settings, onChanged, onDirtyChange }: { products: Product[]; settings: SettingsData; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
   const [tables, setTables] = useState<DiningTable[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [tableProductSearch, setTableProductSearch] = useState('');
   const [cart, setCart] = useState<Record<number, number>>({});
   const [priceOverrides, setPriceOverrides] = useState<Record<number, number>>({});
   const [orderDirty, setOrderDirty] = useState(false);
@@ -3176,8 +3177,18 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
         {selectedTable && (
           <section className="panel table-product-panel">
             <div className="panel-heading"><div><h2>Agregar a {selectedTable.name}</h2><p>Seleccioná los productos para esta cuenta.</p></div></div>
+            <label className="checkout-search">
+              <span className="search-label"><span className="search-icon" aria-hidden="true">⌕</span> Buscar producto</span>
+              <input
+                type="search"
+                value={tableProductSearch}
+                onChange={(event) => setTableProductSearch(event.target.value)}
+                placeholder="Nombre o descripción"
+                aria-label="Buscar producto por nombre o descripción"
+              />
+            </label>
             <div className="picker-grid">
-              {products.filter((product) => product.stock > 0).map((product) => (
+              {products.filter((product) => product.stock > 0 && `${product.name} ${product.description}`.toLocaleLowerCase().includes(tableProductSearch.trim().toLocaleLowerCase())).map((product) => (
                 <button key={product.id} className="picker-card" disabled={busy} onClick={() => addProduct(product, 1)}>
                   <div className="product-thumb">{product.image_path ? <img src={product.image_path} alt="" /> : '🍗'}</div>
                   <strong>{product.name}</strong><span>{money(product.price_cents)}</span><small>{product.stock} en inventario</small>
@@ -3185,6 +3196,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
               ))}
             </div>
             {!products.some((product) => product.stock > 0) && <div className="empty-state">No hay productos con stock disponible.</div>}
+            {products.some((product) => product.stock > 0) && !products.some((product) => product.stock > 0 && `${product.name} ${product.description}`.toLocaleLowerCase().includes(tableProductSearch.trim().toLocaleLowerCase())) && <div className="empty-state">No hay productos que coincidan con la búsqueda.</div>}
           </section>
         )}
       </div>
