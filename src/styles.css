@@ -3951,3 +3951,9 @@ body {
   .table-order-sidebar { padding: 16px; }
 }
 @media (max-width: 560px) { .tables-overview, .table-product-panel, .table-order-panel { padding: 16px; } .salon-heading { flex-direction: column; } .table-management-actions { width: 100%; flex-wrap: wrap; } .table-management-actions .secondary-button { margin-left: auto; } .tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dining-table-card { min-height: 128px; } }
+
+/* Keep the five daily metrics together at wide sizes and balanced at narrower widths. */
+.stats-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 360px) { .stats-grid { grid-template-columns: 1fr; } }

@@ -3315,7 +3315,7 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
-          {error && <div className="form-error">{error}</div>}
+          {error && <div className="form-error" role="alert">{error}</div>}
           <button className="primary-button full-button" disabled={busy}>
             {busy ? 'Ingresando…' : 'Ingresar al sistema'}
           </button>
@@ -3515,6 +3515,7 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
   const [backupBusy, setBackupBusy] = useState(false);
   const [automaticBackup, setAutomaticBackup] = useState<AutomaticBackupStatus | null>(null);
   useEffect(() => setForm(settings), [settings]);
@@ -3532,8 +3533,10 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
       setApiKey('');
       setAiConfig(await window.salesApi.ai.getConfig());
       setMessage('Clave de Ollama Cloud guardada de forma segura.');
+      setError('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo guardar la clave.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo guardar la clave.');
     } finally {
       setAiBusy(false);
     }
@@ -3544,8 +3547,10 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
       await window.salesApi.ai.clearKey();
       setAiConfig(await window.salesApi.ai.getConfig());
       setMessage('Clave de Ollama Cloud eliminada.');
+      setError('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo eliminar la clave.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo eliminar la clave.');
     } finally {
       setAiBusy(false);
     }
@@ -3554,8 +3559,11 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
     try {
       const saved = await window.salesApi.ai.saveModel(model);
       setAiConfig((previous) => ({ ...previous, ...saved }));
+      setMessage('Modelo guardado.');
+      setError('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo guardar el modelo.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo guardar el modelo.');
     }
   };
   const submit = async (e: React.FormEvent) => {
@@ -3567,9 +3575,11 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
         tableCount: form.tableCount,
       });
       setMessage('Configuración guardada.');
+      setError('');
       await onSaved();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo guardar la configuración.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo guardar la configuración.');
     }
   };
   const changePassword = async (e: React.FormEvent) => {
@@ -3579,8 +3589,10 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
       setCurrentPassword('');
       setNewPassword('');
       setMessage('Contraseña actualizada.');
+      setError('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo actualizar la contraseña.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo actualizar la contraseña.');
     }
   };
   const backup = async () => {
@@ -3589,10 +3601,12 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
       const result = await window.salesApi.database.backup();
       if (!result.canceled) {
         setMessage(`Copia guardada en ${result.filePath}`);
+        setError('');
         setAutomaticBackup(await window.salesApi.database.automaticStatus());
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo crear la copia.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo crear la copia.');
     } finally {
       setBackupBusy(false);
     }
@@ -3603,10 +3617,12 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
       const result = await window.salesApi.database.restore();
       if (!result.canceled) {
         setMessage('Base restaurada correctamente.');
+        setError('');
         await onSaved();
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo restaurar la base.');
+      setMessage('');
+      setError(error instanceof Error ? error.message : 'No se pudo restaurar la base.');
     } finally {
       setBackupBusy(false);
     }
@@ -3659,7 +3675,6 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
             />
             <small className="field-hint">Para reducir la cantidad, primero liberá las mesas con pedidos abiertos.</small>
           </label>
-          {message && <p className="success-message">{message}</p>}
           <button className="primary-button">Guardar configuración</button>
         </form>
       </div>
@@ -3758,6 +3773,8 @@ function Settings({ settings, onSaved }: { settings: SettingsData; onSaved: () =
           <span>Estado</span>
           <b className="status-label">● Operativa</b>
         </div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {message && <p className="success-message" role="status">{message}</p>}
         <div className="about-row">
           <span>Copias automáticas (solo la última)</span>
           <b className={automaticBackup?.lastError ? 'form-error' : 'status-label'}>
