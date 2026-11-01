@@ -14,11 +14,11 @@ Preserve current business rules and the previously approved warm, tactile poller
 - T4 [S1] Fix history refresh signaling and clarify expense-list scope/filtering — route: `gentle-ai-worker` background with focused verification — commit: `b164bc3`; status: done.
 - T5 [S1] Improve checkout and table-service discoverability while preserving payment and save semantics — route: `gentle-ai-worker` background with focused verification — commit: `64084a8`; status: done.
 - T6 [S1] Improve shared visual hierarchy and accessible feedback — route: `gentle-ai-worker` background with focused verification — commit: `825707b`; status: done.
-- T7 [S1-S2] Verify public workflows, accessibility states, production build, and visual evidence — route: parent plus user-run visual review; commit: pending; status: blocked awaiting user screenshots of the generated app.
-- T8 [S2] Improve expense list usability and preserve transparent limits; verify existing history filters and improve history async feedback — route: parent implementation, test-first — commit: pending; status: done (checks passed).
-- T9 [S2] Verify and retain actionable alert-to-resolution behavior and cash/expense notification feedback without changing business rules — route: parent verification — commit: n/a; status: done (existing behavior verified in source).
-- T10 [S2] Audit/polish cashier workflow discoverability and loading/error feedback across primary sections, preserving current checkout/payment semantics — route: parent implementation, test-first; commit: pending; status: done (existing checkout/table improvements plus T8 feedback work).
-- T11 [S3] Normalize technical error details into clear user-facing messages across renderer error alerts while retaining useful validation guidance — route: parent implementation, test-first — commit: pending; status: done (focused checks passed).
+- T7 [S1-S2] Verify public workflows, accessibility states, production build, and visual evidence — route: parent plus user-run visual review; commit: `c890014` (functional/build checks); status: blocked awaiting user screenshots of the generated app.
+- T8 [S2] Improve expense list usability and preserve transparent limits; verify existing history filters and improve history async feedback — route: parent implementation, test-first — commit: `c890014`; status: done (checks passed).
+- T9 [S2] Verify and retain actionable alert-to-resolution behavior and cash/expense notification feedback without changing business rules — route: parent verification — commit: `c890014` (recorded); status: done (existing behavior verified in source).
+- T10 [S2] Audit/polish cashier workflow discoverability and loading/error feedback across primary sections, preserving current checkout/payment semantics — route: parent implementation, test-first; commit: `c890014`; status: done (existing checkout/table improvements plus T8 feedback work).
+- T11 [S3] Normalize technical error details into clear user-facing messages across renderer error alerts while retaining useful validation guidance — route: parent implementation, test-first — commit: `c890014`; status: done (focused checks passed).
 
 ## Log
 - L1: “Quiero que mejores todo el software, quiero que lo mejores en usabilidad, en diseño, etc. Vamos a darle usa ODD, y sub agentes en background”
