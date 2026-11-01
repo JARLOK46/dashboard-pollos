@@ -873,6 +873,36 @@ button:disabled {
   font-weight: 400;
   background: #fff;
 }
+.expense-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.7fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0 8px;
+}
+.expense-filters label {
+  display: grid;
+  gap: 5px;
+  color: #697585;
+  font-size: 11px;
+  font-weight: 700;
+}
+.expense-filters input,
+.expense-filters select {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.expense-filters > span {
+  padding-bottom: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .expense-row {
   display: flex;
   justify-content: space-between;
@@ -1058,6 +1088,14 @@ button:disabled {
 .status-label {
   color: #0c9d70;
   font-size: 10px;
+}
+@media (max-width: 700px) {
+  .expense-filters {
+    grid-template-columns: 1fr;
+  }
+  .expense-filters > span {
+    padding-bottom: 0;
+  }
 }
 @media (max-width: 900px) {
   .settings-grid,
@@ -1379,6 +1417,8 @@ button:disabled {
 .dark-theme .analytics-toolbar input,
 .dark-theme .history-filterbar input,
 .dark-theme .history-filterbar select,
+ .dark-theme .expense-filters input,
+ .dark-theme .expense-filters select,
 .dark-theme .modal input,
 .dark-theme .modal textarea,
 .dark-theme .cash-action input,

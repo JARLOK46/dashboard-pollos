@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { userFacingError } from './error-messages';
 import './styles.css';
 
 type Product = {
@@ -144,16 +145,6 @@ const money = (amount: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(
     amount,
   );
-function userFacingError(cause: unknown, fallback: string) {
-  const raw = cause instanceof Error ? cause.message : '';
-  const message = raw
-    .replace(/^Error invoking remote method '[^']+':\s*Error:\s*/i, '')
-    .replace(/^Error:\s*/i, '')
-    .trim();
-  if (message.includes('La caja no está abierta'))
-    return 'Para registrar una venta en efectivo, primero abrí la caja desde Control de caja.';
-  return message || fallback;
-}
 function formatAIOutput(text: string) {
   return text
     .replace(/\r\n/g, '\n')
@@ -494,7 +485,7 @@ function ExpenseToolPreview({
       onStatus('completed');
       await refresh();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'No se pudo completar la acción.';
+      const message = userFacingError(cause, 'No se pudo completar la acción.');
       setError(message);
       if (messageId) {
         try {
@@ -535,7 +526,7 @@ function ExpenseToolPreview({
         : toolStatus === 'cancelled'
           ? 'Propuesta cancelada.'
           : toolStatus === 'failed'
-            ? `No se pudo completar la acción.${toolError ? ` ${toolError}` : ''}`
+            ? userFacingError(toolError, 'No se pudo completar la acción.')
             : null;
   if (lifecycleMessage)
     return (
@@ -861,7 +852,7 @@ function useConversationPersistence({
       setError('');
       setHistoryOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.');
+      setError(userFacingError(cause, 'No se pudo crear el chat.'));
     }
   };
   const selectConversation = (id: string) => {
@@ -893,7 +884,7 @@ function useConversationPersistence({
       setError('');
       setHistoryOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
+      setError(userFacingError(cause, 'No se pudo eliminar el chat.'));
     } finally {
       deletingSessionIdsRef.current.delete(id);
       setDeletingId(null);
@@ -962,7 +953,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
       setError('');
       setHistoryOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.');
+      setError(userFacingError(cause, 'No se pudo crear el chat.'));
     }
   };
   const selectConversation = (id: string) => {
@@ -999,7 +990,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
       setError('');
       setHistoryOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
+      setError(userFacingError(cause, 'No se pudo eliminar el chat.'));
     } finally {
       deletingSessionIdsRef.current.delete(id);
       setDeletingId(null);
@@ -1027,7 +1018,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
       });
       if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.');
+      setError(userFacingError(cause, 'No se pudo guardar el mensaje.'));
       return;
     }
     updateActive((conversation) => ({
@@ -1070,8 +1061,7 @@ function AIChat({ visible = true, refresh }: { visible?: boolean; refresh: () =>
         ],
       }));
     } catch (cause) {
-      const message =
-        cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.';
+      const message = userFacingError(cause, 'No se pudo conectar con el asistente.');
       setError(message);
     } finally {
       setBusy(false);
@@ -1353,7 +1343,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
       setError('');
       setHistoryOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el chat.');
+      setError(userFacingError(cause, 'No se pudo eliminar el chat.'));
     } finally {
       deletingSessionIdsRef.current.delete(id);
       setDeletingId(null);
@@ -1370,7 +1360,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
       setError('');
       setHistoryOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo crear el chat.');
+      setError(userFacingError(cause, 'No se pudo crear el chat.'));
     }
   };
   const send = async (value = question, mode: 'question' | 'daily-summary' = 'question') => {
@@ -1391,7 +1381,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
       });
       if (activeIdRef.current !== requestSessionId || deletingSessionIdsRef.current.has(requestSessionId)) return;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el mensaje.');
+      setError(userFacingError(cause, 'No se pudo guardar el mensaje.'));
       return;
     }
     updateActive((item) => ({
@@ -1436,8 +1426,7 @@ function AIWorkspace({ refresh }: { refresh: () => Promise<void> }) {
         ],
       }));
     } catch (cause) {
-      const message =
-        cause instanceof Error ? cause.message : 'No se pudo conectar con el asistente.';
+      const message = userFacingError(cause, 'No se pudo conectar con el asistente.');
       setError(message);
     } finally {
       setBusy(false);
@@ -2391,7 +2380,7 @@ function StockAdjustModal({
       });
       await saved();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo ajustar el stock.');
+      setError(userFacingError(error, 'No se pudo ajustar el stock.'));
     }
   };
   return (
@@ -2571,7 +2560,7 @@ function ProductModal({
       else await window.salesApi.products.create(input);
       await saved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el producto.');
+      setError(userFacingError(cause, 'No se pudo guardar el producto.'));
       setBusy(false);
     }
   };
@@ -2583,7 +2572,7 @@ function ProductModal({
       await window.salesApi.products.archive({ id: product.id });
       await saved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar el producto.');
+      setError(userFacingError(cause, 'No se pudo eliminar el producto.'));
       setArchiveBusy(false);
     }
   };
@@ -3030,7 +3019,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
 
   const loadTables = async () => setTables(await window.salesApi.tables.list());
   useEffect(() => {
-    void loadTables().catch((cause) => setError(cause instanceof Error ? cause.message : 'No se pudieron cargar las mesas.'));
+    void loadTables().catch((cause) => setError(userFacingError(cause, 'No se pudieron cargar las mesas.')));
   }, []);
 
   const selectTable = async (table: DiningTable) => {
@@ -3054,7 +3043,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
       setCustomerName(order?.customer_name ?? '');
       setNotes(order?.notes ?? '');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo abrir el pedido de la mesa.');
+      setError(userFacingError(cause, 'No se pudo abrir el pedido de la mesa.'));
     }
   };
 
@@ -3084,7 +3073,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
       if (announce) setMessage(`Pedido de ${selectedTable.name} guardado automáticamente.`);
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo guardar el pedido.');
+      setError(userFacingError(cause, 'No se pudo guardar el pedido.'));
       return false;
     } finally {
       setBusy(false);
@@ -3148,7 +3137,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
       await Promise.all([loadTables(), onChanged()]);
       setMessage('Cuenta cobrada y venta registrada.');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo cobrar el pedido.');
+      setError(userFacingError(cause, 'No se pudo cobrar el pedido.'));
     } finally {
       setBusy(false);
     }
@@ -3166,7 +3155,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
       await loadTables();
       setMessage(delta > 0 ? `Mesa ${nextCount} agregada.` : `Mesa ${settings.tableCount} eliminada.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo modificar la cantidad de mesas.');
+      setError(userFacingError(cause, 'No se pudo modificar la cantidad de mesas.'));
     } finally {
       setBusy(false);
     }
@@ -3193,7 +3182,7 @@ function Tables({ products, settings, onChanged, onDirtyChange }: { products: Pr
       setMessage(`${selectedTable.name} quedó disponible.`);
       setError('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo liberar la mesa.');
+      setError(userFacingError(cause, 'No se pudo liberar la mesa.'));
     } finally {
       setBusy(false);
     }
@@ -3336,7 +3325,7 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
       if (await window.salesApi.auth.login({ email, password })) onLogin(email);
       else setError('Correo o contraseña incorrectos.');
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
+      setError(userFacingError(error, 'No se pudo iniciar sesión.'));
     } finally {
       setBusy(false);
     }
@@ -3599,7 +3588,7 @@ function Settings({
       setError('');
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo guardar la clave.');
+      setError(userFacingError(error, 'No se pudo guardar la clave.'));
     } finally {
       setAiBusy(false);
     }
@@ -3613,7 +3602,7 @@ function Settings({
       setError('');
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo eliminar la clave.');
+      setError(userFacingError(error, 'No se pudo eliminar la clave.'));
     } finally {
       setAiBusy(false);
     }
@@ -3626,7 +3615,7 @@ function Settings({
       setError('');
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo guardar el modelo.');
+      setError(userFacingError(error, 'No se pudo guardar el modelo.'));
     }
   };
   const submit = async (e: React.FormEvent) => {
@@ -3642,7 +3631,7 @@ function Settings({
       await onSaved();
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo guardar la configuración.');
+      setError(userFacingError(error, 'No se pudo guardar la configuración.'));
     }
   };
   const changePassword = async (e: React.FormEvent) => {
@@ -3655,7 +3644,7 @@ function Settings({
       setError('');
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo actualizar la contraseña.');
+      setError(userFacingError(error, 'No se pudo actualizar la contraseña.'));
     }
   };
   const backup = async () => {
@@ -3669,7 +3658,7 @@ function Settings({
       }
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo crear la copia.');
+      setError(userFacingError(error, 'No se pudo crear la copia.'));
     } finally {
       setBackupBusy(false);
     }
@@ -3685,7 +3674,7 @@ function Settings({
       }
     } catch (error) {
       setMessage('');
-      setError(error instanceof Error ? error.message : 'No se pudo restaurar la base.');
+      setError(userFacingError(error, 'No se pudo restaurar la base.'));
     } finally {
       setBackupBusy(false);
     }
@@ -3924,11 +3913,28 @@ function History({
   const [status, setStatus] = useState<'all' | 'active' | 'voided'>('active');
   const [filtered, setFiltered] = useState<Sale[]>(sales);
   const [selected, setSelected] = useState<Sale | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState('');
+  const [historyRetry, setHistoryRetry] = useState(0);
   useEffect(() => {
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError('');
     window.salesApi.sales
       .list(10000, { ...range, paymentMethod: payment, status })
-      .then((result) => setFiltered(result as Sale[]));
-  }, [range.from, range.to, payment, status, salesRefreshVersion]);
+      .then((result) => {
+        if (!cancelled) setFiltered(result as Sale[]);
+      })
+      .catch((cause) => {
+        if (!cancelled) setHistoryError(userFacingError(cause, 'No se pudo cargar el historial.'));
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range.from, range.to, payment, status, salesRefreshVersion, historyRetry]);
   const exportData = async (format: 'csv' | 'xlsx') => {
     const result = await window.salesApi.export(format, { ...range, paymentMethod: payment, status });
     if (!result.canceled) setMessage(`Archivo guardado en ${result.filePath}`);
@@ -4017,6 +4023,13 @@ function History({
         </div>
       </div>
       {message && <p className="success-message">{message}</p>}
+      {historyLoading && <p className="empty-state" role="status">Cargando ventas…</p>}
+      {historyError && (
+        <p className="form-error" role="alert">
+          No se pudo cargar el historial: {historyError}{' '}
+          <button className="secondary-button" onClick={() => setHistoryRetry((value) => value + 1)}>Reintentar</button>
+        </p>
+      )}
       <SalesTable sales={filtered} onSelect={setSelected} />
       {selected && (
         <SaleDetailModal
@@ -4057,7 +4070,7 @@ function SaleDetailModal({
       await window.salesApi.sales.void(sale.id, reason.trim());
       await onVoided();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo anular la venta.');
+      setError(userFacingError(error, 'No se pudo anular la venta.'));
     } finally {
       setBusy(false);
     }
@@ -4189,9 +4202,7 @@ function Reports() {
       },
       (loadError) => {
         if (!current) return;
-        setError(
-          loadError instanceof Error ? loadError.message : 'No se pudo cargar el reporte.',
-        );
+        setError(userFacingError(loadError, 'No se pudo cargar el reporte.'));
         setLoading(false);
       },
     );
@@ -4208,9 +4219,7 @@ function Reports() {
       if (!result.canceled) setMessage(`Reporte guardado en ${result.filePath}`);
     } catch (exportError) {
       setError(
-        exportError instanceof Error
-          ? `${exportError.message} Podés intentar exportarlo nuevamente.`
-          : 'No se pudo exportar el reporte. Podés intentar nuevamente.',
+        `${userFacingError(exportError, 'No se pudo exportar el reporte.')} Podés intentar exportarlo nuevamente.`,
       );
     } finally {
       setExporting(false);
@@ -4362,10 +4371,28 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('insumos');
   const [error, setError] = useState('');
-  const load = async () => setExpenses(await window.salesApi.expenses.list(100));
+  const [loadError, setLoadError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const load = async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setExpenses(await window.salesApi.expenses.list(100));
+    } catch (cause) {
+      setLoadError(userFacingError(cause, 'No se pudieron cargar los gastos.'));
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
-    load();
+    void load();
   }, []);
+  const visibleExpenses = expenses.filter((expense) => {
+    const matchesSearch = String(expense.description ?? '').toLocaleLowerCase('es').includes(search.trim().toLocaleLowerCase('es'));
+    return matchesSearch && (categoryFilter === 'all' || expense.category === categoryFilter);
+  });
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -4385,7 +4412,7 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
       await load();
       await onChanged();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'No se pudo guardar el gasto.';
+      const message = userFacingError(cause, 'No se pudo guardar el gasto.');
       setError(
         message.includes('caja')
           ? `${message} Abrila desde Control de caja y volvé a intentar.`
@@ -4446,8 +4473,29 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
             <p>Se muestran los últimos 100 egresos de la operación.</p>
           </div>
         </div>
-        {expenses.length ? (
-          expenses.map((exp) => (
+        <div className="expense-filters">
+          <label>
+            Buscar
+            <input aria-label="Buscar gastos" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Descripción del gasto" />
+          </label>
+          <label>
+            Categoría
+            <select aria-label="Filtrar gastos por categoría" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="all">Todas las categorías</option>
+              <option value="insumos">Insumos</option>
+              <option value="servicios">Servicios</option>
+              <option value="personal">Personal</option>
+              <option value="other">Otros</option>
+            </select>
+          </label>
+          <span aria-live="polite">{visibleExpenses.length} gastos encontrados</span>
+        </div>
+        {loading ? (
+          <div className="empty-state" role="status">Cargando gastos…</div>
+        ) : loadError ? (
+          <div className="empty-state" role="alert">No se pudieron cargar los gastos: {loadError} <button className="secondary-button" onClick={() => void load()}>Reintentar</button></div>
+        ) : expenses.length ? visibleExpenses.length ? (
+          visibleExpenses.map((exp) => (
             <div className="expense-row" key={exp.id}>
               <div>
                 <strong>{exp.description}</strong>
@@ -4458,9 +4506,11 @@ function Expenses({ onChanged }: { onChanged: () => Promise<void> }) {
               <b>{money(exp.amount_cents)}</b>
             </div>
           ))
+        ) : expenses.length ? (
+          <div className="empty-state">No hay gastos que coincidan con los filtros.</div>
         ) : (
           <div className="empty-state">Todavía no hay gastos registrados.</div>
-        )}
+        ) : null}
       </section>
     </div>
   );

@@ -15,6 +15,8 @@
     "verify:checkout-table-discovery": "node scripts/verify-checkout-table-discovery.cjs",
     "verify:dashboard-expense-range": "node scripts/verify-dashboard-expense-range.cjs",
     "verify:history-refresh": "node scripts/verify-history-refresh.cjs",
+    "verify:expense-history-ux": "node scripts/verify-expense-history-ux.cjs",
+    "verify:user-facing-errors": "node scripts/verify-user-facing-errors.cjs",
     "verify:shared-feedback": "node scripts/verify-shared-feedback.cjs",
     "verify:reports-async": "node scripts/verify-reports-async.cjs",
     "verify:font-scaling": "node scripts/verify-font-scaling.cjs",
